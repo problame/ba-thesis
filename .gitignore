@@ -1,0 +1,21 @@
+# REMEMBER to update Makefile.inc:clean
+
+**/*.nav
+**/*.aux
+**/*.toc
+**/*.out
+**/*.log
+**/*.vrb
+**/*.snm
+**/*.glo
+**/*.ist
+**/*.run.xml
+**/*.bcf
+**/*.bbl
+**/*.blg
+**/*.fdb_latexmk
+**/*.fls
+**/*.synctex.gz
+
+**/*.pdf
+!**/assets/**/*.pdf

@@ -1,0 +1,373 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[inline]{enumitem}
+\usepackage{parskip} % disable indentation for new paragraphs, increased margin-bottom instead
+\usepackage[english]{babel}
+
+\usepackage{hyperref}
+\usepackage{natbib}
+
+\usepackage{todonotes}
+
+\title{{\large Exposé for Bachelor Thesis}\\Stage-aware Scheduling in a Library OS}
+\author{Christian Schwarz}
+\date{October 2017}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+%Over the last decade, internet giants like Amazon, Google \& Facebook have demonstrated the advantages of \glslink{horizontally scalable}{scale-out} application architectures, pioneering the \gls{container} movement and the \glspl{microservice} design pattern.
+
+% With the rise of cloud computing  \gls{iaas} platforms
+
+% is a manifestation of  encourages highly specialized component services that are assembled into individual applications 
+% horizontally scaled applications (\textit{scale out} workloads) have become 
+% The software industry 
+% \cite{kanev2015profiling}
+% Horizontally scaled workloads
+
+% TODO blablabla about how much the cloud is important
+
+% sw industry trans to cloud
+% smartphones / low power / resource devices
+% outsourced to cloud service providers (SaaS) over the internet
+% thus, server apps are important
+
+Network servers account for a significant percentage of contemporary application software%
+\begin{itemize*}[label={}, before={{:}}, itemjoin={{,}}]
+    \item communication services (email, exchange, etc)
+    \item reverse proxies
+    \item message-queue systems
+    \item and most importantly web-, application- and database-servers
+\end{itemize*}
+form the backbone of both public SaaS providers as well as corporate in-house infrastructure. 
+
+% explain how applications are structured
+The primary concern of a server process is the handling of requests received over an IPC mechanism.
+A common design pattern is to handle each request in a separate \textit{handler} operating system thread.
+This allows for real concurrency and is properly abstracted by libaries in virtually any programming language.
+ % thread pools, etc
+
+% The following heuristics have proven useful for finding stages in application code:
+% \begin{itemize}
+%     \item high-level application library calls (de/encoding, input validation, backend RPC)
+%     \item stack-sampling \& subdividing into stages proportional to the relative amount of CPU time spent in each part of the request 
+
+% Each IO and in particular the \stage{proc} stage are certain to access a significant amount of text and data memory:
+% in total, the \gls{working set} size of the request handler will exceed the on-core-cache size on  \cite{kanev2015profiling}.
+
+% handler
+%     \item ... % TODO
+% \end{itemize}
+
+
+% explain limitations of commodity hardware on which applications are deployed today
+% Such a service will most likely be part of a larger application where
+% individual services are designed to be horizontally scalable on demand (see microservices). %TODO ref
+
+% In such scenarios, manually managed OS installations are rare.
+% Instead, a service instance is deployed to a dedicated virtual or even physical machine. %TODO ref
+
+% This approach of single-purpose machines is taken to the extreme by \glspl{libos} (\textit{unikernels}):
+% the entire virtual machine image only consists of those pieces of code required by the application,
+% promising both performance and security improvements. % TODO ref
+% % whole system optimiazations!
+%By its nature, this VM will only run the code required to fulfill the  the application code  single-purpose and thus can be radically optimized for the application.
+%which only contains the code required(see \textit{Background and Related Work}).% TODO ref
+
+In the last decade, server application architecture \& deployment has been greatly influenced by the availability of cloud computing:
+the \textit{microservice} pattern encourages composition of small, scale-out services
+that only together form a user-facing application.
+
+Microservice instances are then deployed to single-purpose virtual machines or containers %TODO should mention containers here?
+most commonly powered by \texttt{x86\_64} based Intel processors. %TODO ref
+These CPUs are targeted at the mass market and are designed for an extreme variety of workloads.
+
+Recent profiling by \citeauthor{kanev2015profiling} shows that the memory hierarchy of these architectures
+is suboptimal for such scale-out applications:
+the on-core cache size is too small to fit the working sets of the executed threads \cite{kanev2015profiling}.
+
+This \textit{cache thrashing} results in degraded performance and increased energy consumption
+which is undesirable regardless of the scale of deployment.
+
+\section{Background \& Related Work}\label{relatedwork}
+
+\subsection{Ware-house scale computing}
+\todo{Elaborate on cache size problems...? already mentioned that in the intoduction, but should go into more detail?}
+\subsection{Software Data Spreading}
+\citeauthor{sodaspr} propose the \textit{software data spreading} technique that
+``uses compiler-directed thread migration to aggregate cache capacity across cores and chips and improve [single thread] performance''\cite{sodaspr}.
+
+The basic idea is that a thread's working set is distributed over all private on-core caches
+and the thread is pinned to whichever core has the current sub-working set in cache.
+
+Even if the sub-working sets are not totally disjoint, the authors still claim performance gains
+on chips with built-in cache-to-cache transfer functionality.
+
+\subsection{Cohort Scheduling}
+\citeauthor{cohort} in turn propose \textit{cohort scheduling} where the on-core cache hit/miss ratio is improved by
+\begin{enumerate}
+\item partitioning a request handler code into \textit{stages}
+\item grouping pending requests at the same stage into \textit{cohorts} and
+\item scheduling all threads in a cohort consecutively on a processor.
+\end{enumerate}
+
+This exploits the fact that request handlers generally must be implemented to work independently of each other.
+Otherwise, an attacker could easily deadlock the entire server.
+
+To identify cohorts, the authors furthermore propose a programming model called \textit{staged computation}.
+This should not to be confused with the term \textit{stage} introduced in section \ref{propsolution},
+although we certainly took inspiration from it.
+
+\subsection{Unikernels \& Library Operating Systems}
+\todo{briefly explain unikernels, reference mirageos paper, lto, performance \& security benefits, etc}
+\subsubsection{OSv}
+\todo{I think we have to mention it...? How much detail?} 
+
+\subsection{Pipeline Scheduler by Gottschlag}
+
+In a proof-of-concept implementation, \citeauthor{gottschlag2017} combined the approach of \textit{software data spreading} and \textit{cohort scheduling}:
+\todo{how does mathias' pipeline scheduler actually work?}
+%leveraging knowledge about its current stage, a thread is scheduled on a processor that executed the same stage before.
+
+% A first proof-of-concept implementation in Linux shows more than $10\%$ performance gains %TODO ref
+% for the MySQL server. However, TODO what is the exact problem with the approach taken in linux?
+
+\todo{what are the problems of implementing it like mathias did?}
+
+\section{Proposed Solution}\label{propsolution}
+
+The goal of this thesis is a clean implementation of the approach by \citeauthor{gottschlag2017} in the OSv library operating system.
+Subsequently, the implementation shall be evaluated by comparison to unmodified OSv and an up-to-date Linux installation.
+
+We define the concept of \textit{stages} leaning onto the proposal from \cite{cohort}:
+\begin{quote}
+A \textbf{stage} describes a logical section of a program that distinguishes itself from other logical sections in the program
+through a (mostly) disjoint working set.
+\end{quote}
+
+In server applications, the request handling code is the primary target for stage partitioning.
+Let us consider the request handler of a simple HTTP service that converts images to thumbnails:
+{
+\newcommand{\stage}[1]{\texttt{#1}}
+\begin{description}[parsep=0pt,labelwidth=1cm,itemindent=1cm]
+    \item[\textit{\stage{stage}}] \textit{stage description}
+    \item[\stage{limit}] client rate limiting / blacklist
+    \item[\stage{recv}] buffer request (up to max request size) 
+    \item[\stage{dec}] decode request parameters (JSON) \& image data
+    \item[\stage{auth}] user authentication \& authorization against user database service
+    \item[\stage{proc}] image processing / thumbnail generation
+    \item[\stage{save}] store thumbnails in download directory
+    \item[\stage{enc}] construct JSON response with download URLs
+    \item[\stage{send}] send response to client socket
+\end{description}
+Obviously, \stage{recv}, \stage{auth}, \stage{save} and \stage{send} will be IO-bound
+while \stage{rl}, \stage{dec} \stage{enc} and in particular \stage{proc} are likely CPU-bound.
+
+It is crucial to observe that the majority of IO-bound code is part of OSv, not the application.
+Nonetheless, this code is still part of the request handler's working set and must be taken into account when defining stages.
+}
+
+
+% Subsequently, the policy shall be evaluated using performance benchmarks comparing our implementation to
+% both unmodified \gls{osv} and an up-to-date Linux kernel.
+% why...
+
+% Building on a proof-of-concept by \citeauthor{gottschlag2017} implemented in the Linux,
+% this theses' goal is
+
+% TODO: why not just increase cache size? -> market needs, applications will grow cache footprint in turn, etc
+%       handling of one thrashing thread while all others fit in
+
+
+% unikernels & osv
+% software data spreading techniques
+% cohort scheduling
+% relation to performance analysis: flame graphs?
+% mathias' demo implementation
+
+
+% Our solution to the aforementioned shortcomings is based on a new scheduling policy leveraging knowledge about a thread's current stage:
+
+\subsection{Work Plan}
+
+Based on the aforementioned concepts, our work plan for this thesis lays out as follows:
+
+% The concrete work plan lays out as follows:
+\begin{enumerate}
+    \item \label{stageapi} Define a C/C++ API to partition application code into stages.
+    \item \label{appdesign} Find an existing server application $A$ that
+    \begin{enumerate}
+        \item handles requests by spawning or re-using an operating system thread,
+        \item keeps this relationship between thread and request intact until the request handler has finished executing,
+        \item \label{app_osv_image} can be compiled and built into an OSv virtual machine image.
+    \end{enumerate}
+    \item Explore heuristics to identify stages in application code.
+    \item Partition $A$'s code into stages using aforementioned API.
+    \begin{enumerate}
+        \item Define a number of $S_A \ge 1$ stages.
+        \item Assert that a thread is always in the correct stage $S_i \in S_A$.
+    \end{enumerate}
+    \item \label{redo} Implement a \textit{stage-aware scheduling policy} in OSv (see section \ref{stageawaresched}).
+    \item Evaluate the implemented solution (see section \ref{evaluation}).
+    \item If necessary, goto \ref{redo}.
+    \item Repeat the above with other suitable applications. (Optional)
+    \todo{Stagify OSv?}
+\end{enumerate}
+
+Work item \ref{stageapi} has already been started by \citeauthor{gottschlag2017}.
+
+The obvious candidate for an existing application is the MySQL database server:
+databases are typical bottlenecks in web applications and usually the first to be installed on a dedicated machine\todo{buzzword: multi-tier architecture}.
+MySQL implements the threading model outlined in \ref{appdesign} (see \cite{mysqlThreading}),
+has already been used in \citeauthor{gottschlag2017}'s proof of concept
+and been ported to OSv. \label{willusemysqlfirst}
+
+Stack-sampling has proven as a useful heuristic for identifying stages.
+The ability to instrument the memory hierarchy using performance counters should also be investigated.
+
+% Operating system threads (traditionally called kernel threads) take precedence over any threads of $A$ 
+% and may define their own stages. %TODO ? then use a new variable for S below
+
+\subsubsection{Stage-Aware Scheduling}\label{stageawaresched}
+
+The major effort of this thesis will lie in the implementation of the \emph{stage-aware scheduler}, the development of a suitable \emph{policy} as well as its evaluation.
+
+The basic idea behind our proposal is to leverage knowledge about a thread's current stage when making scheduling decisions:
+\begin{quote} %TODO right env
+A ready thread in stage $S_i$ should be scheduled on a processor $P$ that last ran a thread also in stage $S_i$.
+\end{quote}
+
+To maintain tractability of this problem, we assume a fixed number of $P$ symmetric processors with a uniform memory architecture.
+NUMA architectures do not receive special attention in this thesis. \todo{justify this?}% TODO justify? basically, the NUMA costs on thread migration must be taken into account... what else?
+
+At the time of writing this exposé, the implementation details have not been figured out yet.
+Thus, the remainder of this section presents aspects that should be kept in mind when designing and implementing the scheduling policy:
+% to keep in mind when designing the scheduling policy  proposes a very basic policy and raises some concerns
+% picked up again in the \textit{Evaluation} chapter \textit{below}: % TODO ref
+
+The aforementioned \textit{stage C API} is effectively an additional entry point to the OSv scheduler.
+
+By scheduling a stage on the same core, the pre-warmed cache and
+the assumed correct partitioning of the thread's stages
+will lead to a reduction in cache misses and thus better performance.
+It should be apparent that this idea borrows heavily from \cite{sodaspr,cohort}.
+
+Recall variables \textbf{$S$} (all stages), \textbf{$P$} (all processors) and \textbf{$T$} (\#threads):\\
+If $|S| \le |P|$, a first draft of the scheduling policy would
+assign each stage $S_i$ to a single $P_i$ and schedule threads in $S_i$ only the corresponding $P_i$.
+
+By spreading a thread's distinct working sets over $P$ processors,
+the effectively available cache size is increased up to a factor of $|P|$, depending on
+\begin{enumerate*}
+    \item how disjoint the stage's working sets actually are and
+    \item that the size of each stage's working set is smaller than the on-core cache size ($size(S_i) \overset{!}{\le} size{on\_core\_cache}$)
+\end{enumerate*}.
+
+However, if $S > P$
+\begin{itemize}
+    \item \textit{victim stages} must be found that are a scheduled on the same processor,
+    \item the effectiveness of the choice of victim stages could be evaluated using CPU performance counters and
+    \item given this knowledge, other victim stages could be chosen.  
+\end{itemize}
+
+Apart from the mapping of $S \mapsto P$, it is an open question how well the proposed technique scales with the number of stages and each stages working set size $size(S_i)$.
+We assume there exists a break-even value for $size(S_i)$ below which migration costs exceed the benefits reaped from the proposed policy.
+% (Working sets will not be $100\%$ distinct, cache misses will occur, cache coherence protocol costs, etc). 
+
+Also, the proposed 1:1 mapping $S \mapsto P$ leads to suboptimal resouce utilization if any stage $S_c$ is a point of congestion:
+threads will compete for the processor $P_c$ and under-utilize all other processors $P_d$ where $d \ne c$.
+
+An obvious solution is to assign $S_c$ to several $P_{c,i}$, introducing another scheduling dimension.
+However, this still only works if the average stage execution times are of the same order of magnitude.
+
+A last aspect are threads not spawned by the application but by OSv (traditionally called \emph{kernel-only threads}),
+e.g. file system worker threads.\todo{make it clear we don't mean the upper half of FS code executed by a syscall}
+Ideally, these should also be adapted to the staging API although we figure time will not allow for this to happen.
+
+We can conclude that the simple stage-aware scheduling policy outlined above is rather specific and
+is likely suboptimal for a multi-purpose / multi-user operating system.
+
+With OSv though, we are targeting a library OS:
+the entire system is running a single server app and all resources dedicated to the virtual machine are available for that purpose.
+
+\subsection{Evaluation}\label{evaluation}
+
+\subsubsection{Environment}\label{environment}
+Before discussing the details of how we evaluate our implementation,
+we need to investigate how the usage of a library OS constraints our benchmarking environment:
+
+\begin{itemize}
+    \item The proposed scheduling policy explicitly targets server applications.
+    \item A benchmark for a server application does not behave like a server application.
+    \item Thus, executing the benchmark \emph{inside} the OSv VM means that we
+    \begin{enumerate}
+        \item would need to adapt the benchmark to the stage API or
+        \item would need a special-case in the scheduler for the benchmark.
+    \end{enumerate}
+    \item Either way, distorted benchmark results are to be expected.
+\end{itemize}
+
+The virtual machines used for the benchmarks are configures as follows:
+\begin{enumerate}
+    \item Unmodified OSv + unmodified application
+    \item Stage-aware OSv + modified application
+    \item \label{linuxvmsetup} Linux-based VM + unmodified application
+\end{enumerate}
+The hypervisor is planned to be Linux KVM using \texttt{virtio-*} paravirtualization whenever possible.
+
+We recognize that running the Linux setup in a VM may not be a fair comparison:
+OSv \emph{requires} execution in a virtualized environment due to lack of drivers
+but Linux could also use the host's hardware directly (and use cpu\_affinity settings for comparable benchmarks).\\
+If performance gains in OSv do not significantly exceed the expected virtualization overhead, this aspect should be reconsidered.
+
+Lastly, we want to eliminate differences in the Disk IO subsystems from the benchmarks:
+in both the OSv and Linux VMs, the file system storing database data must be RAM-based.
+\todo{Alternatively: Since OSv only has ZFS as alternative, run ZFS on LInux inside linux vm?}
+
+\subsubsection{Benchmarks}
+
+Given the environment outlined above, we propose to execute \textbf{black-box benchmarks} against the virtual machines.
+The primary success metrics are
+\begin{itemize}
+    \item request latency
+    \item total request duration
+    \item standard deviation of the above.
+\end{itemize}
+
+These metrics are suitable to measure the practical advantage of our implementation but
+do not validate our assumption that performance gains result from improved cache hit/miss ratio.
+
+We plan to use performance counters to measure cache hit/miss ration during the benchmark.
+However, further investigation is required to decide whether this should be implemented on the hypervisor or in the guest OSes themselves
+and how this data is merged with the benchmark results.
+
+\subsubsection{MySQL Benchmarks}
+
+As outlined in \ref{willusemysqlfirst}, the first application to be adapted to stage-aware scheduling is the MySQL database server.
+
+The \textit{OLTPBenchmark} project (see (\cite{oltpbench})) combines several RDBM benchmarks.
+\todo{which exactly? should this be mentioned here?}
+Unfortunately, most are designed to be executed on the same machine as the database server, which does not work with OSv (see \ref{environment}).
+Thus, we expect the need to customize the benchmark code with regards to this issue.
+
+\subsubsection{Synthetic Application}
+
+In addition applications such as MySQL, a less complex, synthetic application seems appropriate.
+
+\subsubsection{Other Applications}
+
+It should be noted that if time allows for it, other applications with readily usable benchmarks could be ported.
+
+\clearpage
+
+\printglossaries
+
+\clearpage
+\bibliographystyle{plain}
+\bibliography{bib.bib}
+
+\end{document}
