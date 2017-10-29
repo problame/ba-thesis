@@ -19,23 +19,6 @@
 
 \section{Introduction}
 
-%Over the last decade, internet giants like Amazon, Google \& Facebook have demonstrated the advantages of \glslink{horizontally scalable}{scale-out} application architectures, pioneering the \gls{container} movement and the \glspl{microservice} design pattern.
-
-% With the rise of cloud computing  \gls{iaas} platforms
-
-% is a manifestation of  encourages highly specialized component services that are assembled into individual applications 
-% horizontally scaled applications (\textit{scale out} workloads) have become 
-% The software industry 
-% \cite{kanev2015profiling}
-% Horizontally scaled workloads
-
-% TODO blablabla about how much the cloud is important
-
-% sw industry trans to cloud
-% smartphones / low power / resource devices
-% outsourced to cloud service providers (SaaS) over the internet
-% thus, server apps are important
-
 Network servers account for a significant percentage of contemporary application software%
 \begin{itemize*}[label={}, before={{:}}, itemjoin={{,}}]
     \item communication services (email, exchange, etc)
@@ -50,33 +33,6 @@ The primary concern of a server process is the handling of requests received ove
 A common design pattern is to handle each request in a separate \textit{handler} operating system thread.
 This allows for real concurrency and is properly abstracted by libaries in virtually any programming language.
  % thread pools, etc
-
-% The following heuristics have proven useful for finding stages in application code:
-% \begin{itemize}
-%     \item high-level application library calls (de/encoding, input validation, backend RPC)
-%     \item stack-sampling \& subdividing into stages proportional to the relative amount of CPU time spent in each part of the request 
-
-% Each IO and in particular the \stage{proc} stage are certain to access a significant amount of text and data memory:
-% in total, the \gls{working set} size of the request handler will exceed the on-core-cache size on  \cite{kanev2015profiling}.
-
-% handler
-%     \item ... % TODO
-% \end{itemize}
-
-
-% explain limitations of commodity hardware on which applications are deployed today
-% Such a service will most likely be part of a larger application where
-% individual services are designed to be horizontally scalable on demand (see microservices). %TODO ref
-
-% In such scenarios, manually managed OS installations are rare.
-% Instead, a service instance is deployed to a dedicated virtual or even physical machine. %TODO ref
-
-% This approach of single-purpose machines is taken to the extreme by \glspl{libos} (\textit{unikernels}):
-% the entire virtual machine image only consists of those pieces of code required by the application,
-% promising both performance and security improvements. % TODO ref
-% % whole system optimiazations!
-%By its nature, this VM will only run the code required to fulfill the  the application code  single-purpose and thus can be radically optimized for the application.
-%which only contains the code required(see \textit{Background and Related Work}).% TODO ref
 
 In the last decade, server application architecture \& deployment has been greatly influenced by the availability of cloud computing:
 the \textit{microservice} pattern encourages composition of small, scale-out services
@@ -131,11 +87,6 @@ although we certainly took inspiration from it.
 
 In a proof-of-concept implementation, \citeauthor{gottschlag2017} combined the approach of \textit{software data spreading} and \textit{cohort scheduling}:
 \todo{how does mathias' pipeline scheduler actually work?}
-%leveraging knowledge about its current stage, a thread is scheduled on a processor that executed the same stage before.
-
-% A first proof-of-concept implementation in Linux shows more than $10\%$ performance gains %TODO ref
-% for the MySQL server. However, TODO what is the exact problem with the approach taken in linux?
-
 \todo{what are the problems of implementing it like mathias did?}
 
 \section{Proposed Solution}\label{propsolution}
@@ -170,14 +121,6 @@ while \stage{rl}, \stage{dec} \stage{enc} and in particular \stage{proc} are lik
 It is crucial to observe that the majority of IO-bound code is part of OSv, not the application.
 Nonetheless, this code is still part of the request handler's working set and must be taken into account when defining stages.
 }
-
-
-% Subsequently, the policy shall be evaluated using performance benchmarks comparing our implementation to
-% both unmodified \gls{osv} and an up-to-date Linux kernel.
-% why...
-
-% Building on a proof-of-concept by \citeauthor{gottschlag2017} implemented in the Linux,
-% this theses' goal is
 
 % TODO: why not just increase cache size? -> market needs, applications will grow cache footprint in turn, etc
 %       handling of one thrashing thread while all others fit in
@@ -229,9 +172,6 @@ and been ported to OSv. \label{willusemysqlfirst}
 Stack-sampling has proven as a useful heuristic for identifying stages.
 The ability to instrument the memory hierarchy using performance counters should also be investigated.
 
-% Operating system threads (traditionally called kernel threads) take precedence over any threads of $A$ 
-% and may define their own stages. %TODO ? then use a new variable for S below
-
 \subsubsection{Stage-Aware Scheduling}\label{stageawaresched}
 
 The major effort of this thesis will lie in the implementation of the \emph{stage-aware scheduler}, the development of a suitable \emph{policy} as well as its evaluation.
@@ -246,8 +186,6 @@ NUMA architectures do not receive special attention in this thesis. \todo{justif
 
 At the time of writing this exposé, the implementation details have not been figured out yet.
 Thus, the remainder of this section presents aspects that should be kept in mind when designing and implementing the scheduling policy:
-% to keep in mind when designing the scheduling policy  proposes a very basic policy and raises some concerns
-% picked up again in the \textit{Evaluation} chapter \textit{below}: % TODO ref
 
 The aforementioned \textit{stage C API} is effectively an additional entry point to the OSv scheduler.
 
