@@ -28,26 +28,45 @@ Network servers account for a significant percentage of contemporary application
 \end{itemize*}
 form the backbone of both public SaaS providers as well as corporate in-house infrastructure. 
 
+The broad availability of cloud computing has popularized multi-tier application architectures:
+the \textit{microservice} pattern encourages composition of small, scale-out services through RPC protocols.
+An application component's interface is no longer defined in a programming language but merely consists of its published
+RPC endpoints.
+Applications backed by a database server are a prime exmaple for this kind of deployment:
+the database -- being a typical bottleneck -- is usually the first to be installed on a dedicated machine.
+
+The dominant CPUs in this market are \texttt{x86\_64} based Intel processors targeted at the mass market and tuned for an
+extreme variety of workloads.
+Hardware-supported operating system virtualization is used to isolate applications both for simplified administration
+and increased security.
+Linux is the dominant guest operating system offering a familiar environment and high-performance paravirtualization drivers.
+
 % explain how applications are structured
-The primary concern of a server process is the handling of requests received over an IPC mechanism.
-A common design pattern is to handle each request in a separate \textit{handler} operating system thread.
-This allows for real concurrency and is properly abstracted by libaries in virtually any programming language.
- % thread pools, etc
+The server applications running on top of this stack are primarily concerned with \emph{concurrent} request handling.
+A common design pattern is to implement a sequential \textit{handler} routine to process each request, consisting of
+logical sections such as protocol handling, request decoding, the actual business logic, response encoding, etc.
+Concurrency is then achieved by handling each request in separate operating system thread -- either
+by actually spawning a thread per request or by using a thread pool.
+The sequential handler implementation is easy to understand and extend and
+abstractions for the aforementioned threading models are available in virtually any programming language.
+While more recent developments in language \& library design challenge this approach\footnote{coroutines, async IO, Node.js, Go},
+many legacy applications still follow this model, most notably popular database systems such as MySQL.
 
-In the last decade, server application architecture \& deployment has been greatly influenced by the availability of cloud computing:
-the \textit{microservice} pattern encourages composition of small, scale-out services
-that only together form a user-facing application.
+Recent large-scale profiling at Google \cite{kanev2015profiling} suggests that the memory hierarchy of commodity
+processors is suboptimal for contemporary applications:
+the on-core cache size is too small to fit the working sets of the executed threads.
+This \textit{cache thrashing} results in degraded performance and increases energy consumption, which is undesirable
+regardless of the scale of deployment.
 
-Microservice instances are then deployed to single-purpose virtual machines or containers %TODO should mention containers here?
-most commonly powered by \texttt{x86\_64} based Intel processors. %TODO ref
-These CPUs are targeted at the mass market and are designed for an extreme variety of workloads.
+In section \ref{relatedwork} of this exposé, we examine previous work in this field and
+identify aspects of contemporary computer architecture, software enginerring (application development specifically)
+and realities of software deployment as contributors to the observed suboptimal resource utilization in today's datacenters.
 
-Recent profiling by \citeauthor{kanev2015profiling} shows that the memory hierarchy of these architectures
-is suboptimal for such scale-out applications:
-the on-core cache size is too small to fit the working sets of the executed threads \cite{kanev2015profiling}.
-
-This \textit{cache thrashing} results in degraded performance and increased energy consumption
-which is undesirable regardless of the scale of deployment.
+Leaning on the idea of \emph{staged architectures} in DBMS design (SEDA,\cite{seda}) dating back to the early 2000s,
+we propose an operating system based solution to exploit intra-query cache locality in server applications.
+A key differentiator to exisiting approaches is that only minimal changes to existing application code are required.
+This makes our proposal particularly attractive for large legacy code bases that cannot be trivially refactored to a
+truly staged architecture as proposed by \citeauthor{seda}.
 
 \section{Background \& Related Work}\label{relatedwork}
 
