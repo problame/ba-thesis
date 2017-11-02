@@ -248,77 +248,87 @@ Ideally, these should also be adapted to the staging API although we figure time
 
 We can conclude that the simple stage-aware scheduling policy outlined above is rather specific and
 is likely suboptimal for a multi-purpose / multi-user operating system.
-
 With OSv though, we are targeting a library OS:
 the entire system is running a single server app and all resources dedicated to the virtual machine are available for that purpose.
 
-\subsection{Evaluation}\label{evaluation}
+\section{Evaluation}\label{evaluation}
 
-\subsubsection{Environment}\label{environment}
-Before discussing the details of how we evaluate our implementation,
-we need to investigate how the usage of a library OS constraints our benchmarking environment:
+Stage-aware scheduling is based on the idea that executing a thread in a particular stage on a processor dedicated to
+that stage improves instruction and cache locality and thus application performance.
+The evaluation of our implementation must therefore verify that
+\begin{enumerate*}[label=\emph{(\alph*)}]
+    \item this pre-warming effect on the on-core caches actually exists and
+    \item that our technique actually leads to better net application performance.
+\end{enumerate*}
 
-\begin{itemize}
-    \item The proposed scheduling policy explicitly targets server applications.
-    \item A benchmark for a server application does not behave like a server application.
-    \item Thus, executing the benchmark \emph{inside} the OSv VM means that we
-    \begin{enumerate}
-        \item would need to adapt the benchmark to the stage API or
-        \item would need a special-case in the scheduler for the benchmark.
-    \end{enumerate}
-    \item Either way, distorted benchmark results are to be expected.
-\end{itemize}
+Performance counters in contemporary Intel CPUs offer rich instrumentation of the memory hierarchy. They can be used as a
+data source for verifying reduced on-core cache misses and are applicable to any type of application.
+In contrast, measuring net performance gain is application-specific and requires domain-specific benchmarks.
+An application benchmark creates a typical workload by sending a realistic mix of $\mathbf{N}$ parallel requests for a
+total time $\mathbf{T_{bench}}$ and recording a set of quality metrics per request.
+The resulting dataset allows for extraction of the following aggregated metrics per value of $\mathbf{N}$:
+\begin{enumerate}[label=\emph{(\alph*)}]
+    \item achieved throughput [requests/sec]
+    \item average / min / max request latency [sec]
+    \item $n^{th}$ percentile of request latency [sec]
+\end{enumerate}
+\todo{still too vague / too few? Playing with OLTPBench and HammerDB for a few hours didn't yield more ideas...}
+Additionally, for fixed $N$, the development of these metrics over the course of $T_{bench}$ is useful for identifying
+application-level warm-up effects, internal caching, etc.
 
-The virtual machines used for the benchmarks are configures as follows:
+\todo{mention that SMT enabled yesno should be recorded?}
+
+\subsection{Bechmarking Environment \& Candidates}\label{environment}
+
+Our stage-aware scheduling solution is built into OSv where applications and "OS" code are bundled into an opaque virtual
+machine image.
+We explicitly target server applications but the corresponding benchmarks do not necessarily exhibit the same runtime
+behavior.
+Thus, executing benchmarks \emph{inside} the OSv VM means that we would either need to adapt the benchmarking code to
+use the staging API or need a special-case in the scheduler.
+Neither of these options is desirable and thus makes black-box benchmarking from the hypervisor an attractive choice.
+At the time of writing we still need to investigated whether performance counters can also be read from the hypervisor
+and cleanly attributed to a virtual machine.
+
+The three test setups to be compared shall be configured as follows:
 \begin{enumerate}
-    \item Unmodified OSv + unmodified application
-    \item Stage-aware OSv + modified application
-    \item \label{linuxvmsetup} Linux-based VM + unmodified application
+    \item Unmodified OSv + unmodified application,
+    \item Stage-aware OSv + modified application,
+    \item \label{linuxvmsetup} Linux-based VM + unmodified application.
 \end{enumerate}
 The hypervisor is planned to be Linux KVM using \texttt{virtio-*} paravirtualization whenever possible.
 
 We recognize that running the Linux setup in a VM may not be a fair comparison:
 OSv \emph{requires} execution in a virtualized environment due to lack of drivers
-but Linux could also use the host's hardware directly (and use cpu\_affinity settings for comparable benchmarks).\\
+but Linux could also use the host's hardware \emph{directly} (and use \texttt{taskset(1)} for comparable benchmarks).
 If performance gains in OSv do not significantly exceed the expected virtualization overhead, this aspect should be reconsidered.
 
-Lastly, we want to eliminate differences in the Disk IO subsystems from the benchmarks:
+Lastly, differences in the disk IO subsystems should be eliminated from the benchmarks:
 in both the OSv and Linux VMs, the file system storing database data must be RAM-based.
-\todo{Alternatively: Since OSv only has ZFS as alternative, run ZFS on LInux inside linux vm?}
+It should be considered whether the cache footprint of the in-memory filesystem conflicts with our scheduling policy
+and if so whether memory used for it can be mapped with caching disabled.
 
-\subsubsection{Benchmarks}
+\subsubsection{Microbenchmarks \& Synthetic Applications}
 
-Given the environment outlined above, we propose to execute \textbf{black-box benchmarks} against the virtual machines.
-The primary success metrics are
-\begin{itemize}
-    \item request latency
-    \item total request duration
-    \item standard deviation of the above.
-\end{itemize}
+As explained in work plan item \ref{microbench}, the the staging API shall be first tested with a set of synthetic
+applications.
+Some of these may not be synthetic server applications but merely microbenchmarks exhibiting certain memory access patterns
+with interleaved stage API calls.
+In this case the result data set would reduce to metrics extracted from the memory hierarchy.
+Work in this direction has already been done in the KIT OS group's proof of concept implementation
+(see section \ref{proofofconcept}).
 
-These metrics are suitable to measure the practical advantage of our implementation but
-do not validate our assumption that performance gains result from improved cache hit/miss ratio.
-
-We plan to use performance counters to measure cache hit/miss ration during the benchmark.
-However, further investigation is required to decide whether this should be implemented on the hypervisor or in the guest OSes themselves
-and how this data is merged with the benchmark results.
 
 \subsubsection{MySQL Benchmarks}
 
-As outlined in the working plan, the first application to be adapted to stage-aware scheduling is the MySQL database server.
+The MySQL database server fits our required threading model and has already been adapted to the staging API
+(see section \ref{proofofconcept}).
+The \textit{OLTPBenchmark} project \cite{oltpbench} combines several RDBM benchmarks that simulate different kinds of
+realistic transaction workloads on an SQL database server.
+Our generic quality metrics are exported in the CSV format and the configuration format allows for reproducible test
+setups.
+All benchmarks work over TCP and can thus be executed from the hypervisor, outside of OSv or virtualized Linux.
 
-The \textit{OLTPBenchmark} project (see (\cite{oltpbench})) combines several RDBM benchmarks.
-\todo{which exactly? should this be mentioned here?}
-Unfortunately, most are designed to be executed on the same machine as the database server, which does not work with OSv (see \ref{environment}).
-Thus, we expect the need to customize the benchmark code with regards to this issue.
-
-\subsubsection{Synthetic Application}
-
-In addition applications such as MySQL, a less complex, synthetic application seems appropriate.
-
-\subsubsection{Other Applications}
-
-It should be noted that if time allows for it, other applications with readily usable benchmarks could be ported.
 
 \clearpage
 \bibliographystyle{alpha}
