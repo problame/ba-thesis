@@ -329,6 +329,21 @@ Our generic quality metrics are exported in the CSV format and the configuration
 setups.
 All benchmarks work over TCP and can thus be executed from the hypervisor, outside of OSv or virtualized Linux.
 
+\section{Summary}
+
+In this document we have presented the problems in contemporary processors' memory hierarchy encountered by applications
+with large instruction footprints common in \textit{warehouse-scale computing}.
+We have presented prio work in the field of
+\emph{staged} or \emph{cohort} scheduling,
+staged event-driven application architectures (SEDA),
+its application to database systems,
+and software data spreading.
+Analysis of the failure-scenario of the proof of concept implementation at the KIT OS group lead to the conclusion that
+staged scheduling requires tight integration with the scheduler.
+We propose a solution based on the OSv library operating system where modifying the scheduler to support an
+application-local policy is feasible and does not conflict with system-wide scheduling goals which are still enforced by
+the hypervisor.
+We conclude with a presentation of our evaluation metrics, benchmarking setups and possible benchmark implementations.
 
 \clearpage
 \bibliographystyle{alpha}
