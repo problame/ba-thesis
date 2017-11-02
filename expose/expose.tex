@@ -210,49 +210,40 @@ The basic idea behind our proposal is to leverage knowledge about a thread's cur
 A ready thread in stage $S_i$ should be scheduled on a processor $P$ that last ran a thread also in stage $S_i$.
 \end{quote}
 
-To maintain tractability of this problem, we assume a fixed number of $P$ symmetric processors with a uniform memory architecture.
-NUMA architectures do not receive special attention in this thesis. \todo{justify this?}% TODO justify? basically, the NUMA costs on thread migration must be taken into account... what else?
-
-At the time of writing this exposé, the implementation details have not been figured out yet.
-Thus, the remainder of this section presents aspects that should be kept in mind when designing and implementing the scheduling policy:
-
-The aforementioned \textit{stage C API} is effectively an additional entry point to the OSv scheduler.
-
-By scheduling a stage on the same core, the pre-warmed cache and
-the assumed correct partitioning of the thread's stages
+By scheduling a stage on the same core, the pre-warmed on-core caches and the correct partitioning of the thread's stages
 will lead to a reduction in cache misses and thus better performance.
-It should be apparent that this idea borrows heavily from \cite{sodaspr,cohort}.
+The aforementioned stage API is effectively an additional entry point to the OSv scheduler and can be thought of as an
+extended \texttt{sched\_yield(2)}.
+It should be apparent that this idea borrows heavily from \cite{sodaspr,cohort} and \cite{gottschlag2017}.
 
-Recall variables \textbf{$S$} (all stages), \textbf{$P$} (all processors) and \textbf{$T$} (\#threads):\\
-If $|S| \le |P|$, a first draft of the scheduling policy would
-assign each stage $S_i$ to a single $P_i$ and schedule threads in $S_i$ only the corresponding $P_i$.
+To maintain tractability of this problem, we assume a fixed number of $P$ symmetric processors with a uniform memory architecture.
+Expansion our approach to NUMA systems is left open for further research.
 
-By spreading a thread's distinct working sets over $P$ processors,
-the effectively available cache size is increased up to a factor of $|P|$, depending on
-\begin{enumerate*}
-    \item how disjoint the stage's working sets actually are and
-    \item that the size of each stage's working set is smaller than the on-core cache size ($size(S_i) \overset{!}{\le} size{on\_core\_cache}$)
-\end{enumerate*}.
+We define the following variables to reason about details of the scheduling policy:
+{$\mathbf{S}$} (all stages), $\mathbf{P}$ (all processors) and $\mathbf{T}$ (\#threads).
+If $|S| \le |P|$, a simple idea is to assign each $P_i$ exactly one $S_i$ and schedule threads in $S_i$ only on the corresponding $P_i$.
+By spreading a thread's sub-working sets over $|P|$ processors, the effectively available cache size is thus increased up to a factor
+of $|P|$. We expect a high degree of disjointness in text working sets (instructions) by simply partioning code paths
+using the stage API.
 
-However, if $S > P$
-\begin{itemize}
-    \item \textit{victim stages} must be found that are a scheduled on the same processor,
-    \item the effectiveness of the choice of victim stages could be evaluated using CPU performance counters and
-    \item given this knowledge, other victim stages could be chosen.  
-\end{itemize}
+If $|S| > |P|$ however, stages must necessarily share a processor, limiting the effect of partitioning.
+Naturally, some stages must be selected as \textit{victims} but the precise algorithms for doing so remains open:
+possible options range from developer-indicated priorities over contention metrics such as ready-list length
+to auto-evaluation using CPU performance counters.
+Additionally, we expect interference with SMT support (\textit{hyperthreading}) in both implementation and evaluation.
 
-Apart from the mapping of $S \mapsto P$, it is an open question how well the proposed technique scales with the number of stages and each stages working set size $size(S_i)$.
+Apart from the mapping of $S \mapsto P$, it is an open question how well the proposed technique scales with the number
+of stages and each stage's working set size $size(S_i)$.
 We assume there exists a break-even value for $size(S_i)$ below which migration costs exceed the benefits reaped from the proposed policy.
 % (Working sets will not be $100\%$ distinct, cache misses will occur, cache coherence protocol costs, etc). 
 
 Also, the proposed 1:1 mapping $S \mapsto P$ leads to suboptimal resouce utilization if any stage $S_c$ is a point of congestion:
 threads will compete for the processor $P_c$ and under-utilize all other processors $P_d$ where $d \ne c$.
-
 An obvious solution is to assign $S_c$ to several $P_{c,i}$, introducing another scheduling dimension.
 However, this still only works if the average stage execution times are of the same order of magnitude.
 
 A last aspect are threads not spawned by the application but by OSv (traditionally called \emph{kernel-only threads}),
-e.g. file system worker threads.\todo{make it clear we don't mean the upper half of FS code executed by a syscall}
+e.g. file system worker threads.
 Ideally, these should also be adapted to the staging API although we figure time will not allow for this to happen.
 
 We can conclude that the simple stage-aware scheduling policy outlined above is rather specific and
