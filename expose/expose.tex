@@ -61,138 +61,149 @@ In section \ref{relatedwork} of this exposé, we examine previous work in this f
 identify aspects of contemporary computer architecture, software enginerring (application development specifically)
 and realities of software deployment as contributors to the observed suboptimal resource utilization in today's datacenters.
 
-Leaning on the idea of \emph{staged architectures} in DBMS design (SEDA,\cite{seda}) dating back to the early 2000s,
+Leaning on the idea of \emph{staged architectures} in DBMS design \cite{seda} dating back to the early 2000s,
 we propose an operating system based solution to exploit intra-query cache locality in server applications.
 A key differentiator to exisiting approaches is that only minimal changes to existing application code are required.
 This makes our proposal particularly attractive for large legacy code bases that cannot be trivially refactored to a
-truly staged architecture as proposed by \citeauthor{seda}.
+truly staged architecture as proposed in \cite{seda}.
 
 \section{Background \& Related Work}\label{relatedwork}
 
-\subsection{Ware-house scale computing}
-\todo{Elaborate on cache size problems...? already mentioned that in the intoduction, but should go into more detail?}
-\subsection{Software Data Spreading}
-\citeauthor{sodaspr} propose the \textit{software data spreading} technique that
-``uses compiler-directed thread migration to aggregate cache capacity across cores and chips and improve [single thread] performance''\cite{sodaspr}.
+As mentioned before, the idea of staged computation dates back to the early 2000s:
+\cite{seda} makes the case for \textit{staged event driven architectures} (SEDA) for network servers and
+develop a Java-based implementation framework.
+\cite{harizopoulos2003case} and \cite{harizopoulos2005staged} focus on database systems, identify I-cache
+misses as the primary bottleneck and implement a staged architecture in a research database system.
+Cohort scheduling \cite{cohort} applies the idea of staged execution to scheduling policies and proposes
+a corresponding software framework: request handlers about to enter the next stage are preempted, grouped into
+\textit{cohorts} and then -- for one stage -- dispatched consecutively on the same processor.
+Request latency is thus improved if the gain of warmed-up I-caches outweighs the time lost in the barrier-like batching
+of threads into a cohort.
 
-The basic idea is that a thread's working set is distributed over all private on-core caches
-and the thread is pinned to whichever core has the current sub-working set in cache.
-
+All of the aforementioned papers lean heavily on event-driven designs, with prototype implementations thar are
+system or language specific.
+\emph{Software data spreading} \cite{sodaspr} approaches cache thrashing from a different angle: compiler-profiling is used
+to identify code snippets with a \emph{data} working set greater than that of a single processor core.
+The compiler partitions the snippet's working set into sub-working sets smaller than a single on-core cache, maps each
+sub-working set to a different core and generates thread migration code whenver the sub-working set changes.
 Even if the sub-working sets are not totally disjoint, the authors still claim performance gains
 on chips with built-in cache-to-cache transfer functionality.
+Solutions for cases where the working set exceeds the sum of all on-core cache sizes are also covered.
+However, it should be noted that \cite{kanev2015profiling} re-emphasizes that for \textit{warehouse-scale computing} applications
+like those measured at Google, \emph{instruction} caches are the primary bottleneck in the memory hierarchy.
+The software data spreading paper does not address this issue.
 
-\subsection{Cohort Scheduling}
-\citeauthor{cohort} in turn propose \textit{cohort scheduling} where the on-core cache hit/miss ratio is improved by
-\begin{enumerate}
-\item partitioning a request handler code into \textit{stages}
-\item grouping pending requests at the same stage into \textit{cohorts} and
-\item scheduling all threads in a cohort consecutively on a processor.
-\end{enumerate}
+\subsection{Proof of Concept at the KIT OS Group}\label{proofofconcept}
 
-This exploits the fact that request handlers generally must be implemented to work independently of each other.
-Otherwise, an attacker could easily deadlock the entire server.
+A Linux-based proof of concept implementation at the KIT OS group \todo{ok?} combines the idea of staged execution, cohort
+scheduling and software data spreading into a C API that allows for intuitive conversion of existing code bases to
+staged execution:
+The developer manually identifies stages and inserts library calls into application code for switching the current stage.
+Each CPU core is assigned one or more stages and each time a thread switches to a new stage, it is migrated to a core
+assigned to that stage.
+%While this sounds cumbersome, converting request handlers is matter of minutes given some insight on the instruction
+%footprint between high-level library calls, which can be easily derived from stack sampling and CPU performance
+%counters.
 
-To identify cohorts, the authors furthermore propose a programming model called \textit{staged computation}.
-This should not to be confused with the term \textit{stage} introduced in section \ref{propsolution},
-although we certainly took inspiration from it.
+\emph{Thread migration} thus must be fast.
+%\newcommand{\setaffinity}{\texttt{sched\_setaffinity(2)}}
+The built-in facility for this purpose, \texttt{sched\_setaffinity}, is impractical because Linux uses
+expensive inter-processor-interrupts to implement this syscall.
+The proof of concept thus opted for a hybrid implementation in both user and kernel space resembling an M:N threading model:
+kernel-level-threads (KLTs) are pinned to a specific core and stage.
+User-level threads (ULTs) as seen by the application are always in exactly one stage and run on a KLT.
+Note that there is still one KLT per ULT but a ULT can be migrated to a different KLT when switching stages.
 
-\subsection{Unikernels \& Library Operating Systems}
-\todo{briefly explain unikernels, reference mirageos paper, lto, performance \& security benefits, etc}
-\subsubsection{OSv}
-\todo{I think we have to mention it...? How much detail?} 
+When a ULT makes a call to switch stages, the context of the ULT is saved and enqueued to the next stage's ready queue.
+The KLT that executed that ULT now waits for new ULTs on its own stage's ready queue.
+If it is empty, the KLT makes a blocking syscall to a kernel component to wait for work, avoiding busy waiting
+and enabling switching of its assigned stage through the return value of the call.
+The kernel component is also used to track KLT state changes by callback from the scheduler, ensuring there is always at
+least one KLT per stage actively dequeuing ULTs.
+If KLT state changes were not tracked, a ULT blocking on a mutex would render its KLT
+\texttt{TASK\_INTERRUPTIBLE} and no other ULTs would be dequeued until the mutex is aquired and the KLT switches back to
+\texttt{TASK\_RUNNING}.
 
-\subsection{Pipeline Scheduler by Gottschlag}
-
-In a proof-of-concept implementation, \citeauthor{gottschlag2017} combined the approach of \textit{software data spreading} and \textit{cohort scheduling}:
-\todo{how does mathias' pipeline scheduler actually work?}
-\todo{what are the problems of implementing it like mathias did?}
+The main flaw of the implementation shows on multiprocessor systems with $\frac{\#cores}{stage} > 1$.
+A ULT $U_1$ executes on a KLT $K_1$ and $K_1$ is pinned to core $C_1$.
+When $U_1$ performs a blocking syscall, e.g. waiting for a mutex, $K_1$ blocks and becomes \texttt{TASK\_INTERRUPTIBLE}.
+The Linux scheduler now dispatches another task on $C_1$ to maximize resource utilization.
+When $K_1$ finally aquires the mutex and is \texttt{TASK\_RUNNING} again, it can still only be dispatched to $C_1$ due to
+pinning.
+However, another idle KLT $K_2$ on a different core but same stage as $K_1$ could in theory continue $U_1$.
+But the implementation only performs thread migration when a ULT calls the stage switching API.
+The net effect is CPU underutilization -- the structure of the implementation is not work conserving.
 
 \section{Proposed Solution}\label{propsolution}
 
-The goal of this thesis is a clean implementation of the approach by \citeauthor{gottschlag2017} in the OSv library operating system.
-Subsequently, the implementation shall be evaluated by comparison to unmodified OSv and an up-to-date Linux installation.
+We identify a core architectural problem in the design of the proof of concept implementation:
+the user-level code cannot react to thread state changes until the thread is rescheduled and the user-level part of the
+implementation is invoked through a call from the ULT. A architecturally clean solution requires tight integration with
+the scheduler since staged scheduling is effectively a scheduling policy.
 
-We define the concept of \textit{stages} leaning onto the proposal from \cite{cohort}:
-\begin{quote}
-A \textbf{stage} describes a logical section of a program that distinguishes itself from other logical sections in the program
-through a (mostly) disjoint working set.
-\end{quote}
+Scheduler activations promise \cite{schedulerActivations} a general solution for user-space directed scheduling.
+However, practical implementations of scheduler activations in production operating systems have since been
+deprecated or removed in favor of 1:1 threading models\cite{todo}.
+On the opposite end, a clean implementation in Linux would need to replace the current \emph{completely fair scheduler} (CFS).
+CFS is a system-wide scheduling policy with significant amounts put into it.
+Staged scheduling as proposed in the proof of concept and pursued by this thesis is an application-local policy.
+Replacing the Linux CFS implementation with full in-kernel staged scheduling is thus not only a daring
+endeavor implementation-wise but simply an unsuitable choice.
 
-In server applications, the request handling code is the primary target for stage partitioning.
-Let us consider the request handler of a simple HTTP service that converts images to thumbnails:
-{
-\newcommand{\stage}[1]{\texttt{#1}}
-\begin{description}[parsep=0pt,labelwidth=1cm,itemindent=1cm]
-    \item[\textit{\stage{stage}}] \textit{stage description}
-    \item[\stage{limit}] client rate limiting / blacklist
-    \item[\stage{recv}] buffer request (up to max request size) 
-    \item[\stage{dec}] decode request parameters (JSON) \& image data
-    \item[\stage{auth}] user authentication \& authorization against user database service
-    \item[\stage{proc}] image processing / thumbnail generation
-    \item[\stage{save}] store thumbnails in download directory
-    \item[\stage{enc}] construct JSON response with download URLs
-    \item[\stage{send}] send response to client socket
-\end{description}
-Obviously, \stage{recv}, \stage{auth}, \stage{save} and \stage{send} will be IO-bound
-while \stage{rl}, \stage{dec} \stage{enc} and in particular \stage{proc} are likely CPU-bound.
+Given above considerations and experiences, we therefore propose an implementation of staged scheduling in the OSv
+library operating system.
+This leaves system-wide scheduling to the hypervisor OS and allows for tight integration and customization of the OSv scheduler.
+The nonexistence of a user-kernel-boundary promises a low overhead "in-kernel" implementation of per-stage queueing,
+moving everything but the stage switch syscall out of the application,
+making our solution language-agnostic and only dependent on the per-request threading model.
 
-It is crucial to observe that the majority of IO-bound code is part of OSv, not the application.
-Nonetheless, this code is still part of the request handler's working set and must be taken into account when defining stages.
-}
-
-% TODO: why not just increase cache size? -> market needs, applications will grow cache footprint in turn, etc
-%       handling of one thrashing thread while all others fit in
-
-
-% unikernels & osv
-% software data spreading techniques
-% cohort scheduling
-% relation to performance analysis: flame graphs?
-% mathias' demo implementation
-
-
-% Our solution to the aforementioned shortcomings is based on a new scheduling policy leveraging knowledge about a thread's current stage:
+The questions to be answered by this thesis are:
+\begin{enumerate}
+    \item Can we implement a robust staged scheduling policy in OSv?
+    \item Is the scheduler work-conserving, especially with regards to task state changes described in section \ref{proofofconcept}?
+    \item How does our implementation compare to Linux and unmodified OSv? Specifically...
+        \begin{enumerate}
+            \item Can we observe increased net-performance in applications with large instruction footprints?
+            \item Can we identify reduced I-cache misses with our scheduling policy?
+        \end{enumerate}
+\end{enumerate}
 
 \subsection{Work Plan}
 
-Based on the aforementioned concepts, our work plan for this thesis lays out as follows:
+The coarse work plan for this thesis lays out as follows:
 
 % The concrete work plan lays out as follows:
 \begin{enumerate}
-    \item \label{stageapi} Define a C/C++ API to partition application code into stages.
-    \item \label{appdesign} Find an existing server application $A$ that
+    \item \label{stageapi} Define an system interface allowing an application to communicate stage switches to OSv.
+            A corresponding API should be provided for C and C++ programs.
+    \item \label{schedpolicy} Implement a \textit{stage-aware scheduling policy} in OSv
+            using information from the aforementioned interface (see section \ref{stageawaresched}).
+    \item \label{microbench} Develop a suite of microbenchmarks to measure the effect of our implementation on the memory hierarchy.
+        The benchmarks should mimic the behavior observed in \cite{kanev2015profiling}, namely I-cache and D-cache capacity misses.
+        Furthermore, benchmarks resembling a microservice performing RPC to various backends are of special interest.
+    \item Evaluate the scheduler with microbenchmarks and reiterate on its implementation as necessary.
+    \item \label{appdesign} Find an existing server application $A$ written in C or C++ that
     \begin{enumerate}
         \item handles requests by spawning or re-using an operating system thread,
         \item keeps this relationship between thread and request intact until the request handler has finished executing,
         \item \label{app_osv_image} can be compiled and built into an OSv virtual machine image.
     \end{enumerate}
-    \item Explore heuristics to identify stages in application code.
-    \item Partition $A$'s code into stages using aforementioned API.
-    \begin{enumerate}
-        \item Define a number of $S_A \ge 1$ stages.
-        \item Assert that a thread is always in the correct stage $S_i \in S_A$.
-    \end{enumerate}
-    \item \label{redo} Implement a \textit{stage-aware scheduling policy} in OSv (see section \ref{stageawaresched}).
-    \item Evaluate the implemented solution (see section \ref{evaluation}).
-    \item If necessary, goto \ref{redo}.
-    \item Repeat the above with other suitable applications. (Optional)
-    \todo{Stagify OSv?}
+    \item Customize $A$'s code to use the stage API, based on developer experience, intuition or arbitrary profiling.
+    \item Compare the net performance metrics (black box testing) of $A$ running on stage-aware OSv to unmodified OSv and Linux.
+        Reiterate on the customization of $A$ as necessary and document the process of experimenting with the stage API in a production codebase.
 \end{enumerate}
 
-Work item \ref{stageapi} has already been started by \citeauthor{gottschlag2017}.
-
-The obvious candidate for an existing application is the MySQL database server:
-databases are typical bottlenecks in web applications and usually the first to be installed on a dedicated machine\todo{buzzword: multi-tier architecture}.
-MySQL implements the threading model outlined in \ref{appdesign} (see \cite{mysqlThreading}),
-has already been used in \citeauthor{gottschlag2017}'s proof of concept
-and been ported to OSv. \label{willusemysqlfirst}
-
-Stack-sampling has proven as a useful heuristic for identifying stages.
-The ability to instrument the memory hierarchy using performance counters should also be investigated.
+Some work has already been started for the proof of concept implementation:
+a microbenchmark framework for memory hierarchy access, a C-API for stage switching and customizations to the MySQL
+server already exist.
+MySQL is an excellent demo application because databases are typical bottlenecks in web apps and usually the
+first to be installed on a dedicated machine. It implements the required threading model \cite{mysqlThreading},
+and has already been adopted to the stage API for evaluation of the proof of concept.
 
 \subsubsection{Stage-Aware Scheduling}\label{stageawaresched}
 
-The major effort of this thesis will lie in the implementation of the \emph{stage-aware scheduler}, the development of a suitable \emph{policy} as well as its evaluation.
+The development of a stage-aware scheduling policy and its evaluation is the core task of this thesis.
+The remainder of this subsection outlines the planned implementation followed by open issues.
 
 The basic idea behind our proposal is to leverage knowledge about a thread's current stage when making scheduling decisions:
 \begin{quote} %TODO right env
@@ -303,7 +314,7 @@ and how this data is merged with the benchmark results.
 
 \subsubsection{MySQL Benchmarks}
 
-As outlined in \ref{willusemysqlfirst}, the first application to be adapted to stage-aware scheduling is the MySQL database server.
+As outlined in the working plan, the first application to be adapted to stage-aware scheduling is the MySQL database server.
 
 The \textit{OLTPBenchmark} project (see (\cite{oltpbench})) combines several RDBM benchmarks.
 \todo{which exactly? should this be mentioned here?}
