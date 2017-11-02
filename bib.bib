@@ -29,21 +29,54 @@
   organization={ACM}
 }
 
-@article{seda, %TODO
-  title={SEDA},
-  author={Walsh},
+@inproceedings{seda,
+  title={SEDA: an architecture for well-conditioned, scalable internet services},
+  author={Welsh, Matt and Culler, David and Brewer, Eric},
+  booktitle={ACM SIGOPS Operating Systems Review},
+  volume={35},
+  number={5},
+  pages={230--243},
+  year={2001},
+  organization={ACM}
+}
+
+% special-case papers on SEDA for database systems:
+@inproceedings{harizopoulos2003case,
+  title={A case for staged database systems},
+  author={Harizopoulos, Stavros and Ailamaki, Anastassia},
+  booktitle={CIDR},
+  number={DIAS-CONF-2003-001},
+  year={2003}
+}
+@phdthesis{harizopoulos2005staged,
+  title={Staged database systems},
+  author={Harizopoulos, Stavros},
+  year={2005},
+  school={IBM}
+}
+
+@article{schedulerActivations,
+  title={Scheduler activations: Effective kernel support for the user-level management of parallelism},
+  author={Anderson, Thomas E and Bershad, Brian N and Lazowska, Edward D and Levy, Henry M},
+  journal={ACM Transactions on Computer Systems (TOCS)},
+  volume={10},
+  number={1},
+  pages={53--79},
+  year={1992},
+  publisher={ACM}
 }
 
 @misc{gottschlag2017,
   author={Gottschlag, Mathias},
   howpublished={private communication},
-  year={2017},
+  year={2017}
 }
 
 @misc{mysqlThreading,
   title={MySQL 5.7 Reference Manual :: 28.1.1 MySQL Threads},
   url={https://dev.mysql.com/doc/refman/5.7/en/mysql-threads.html},
-  urldate={2017-10-20},
+  year={2017},
+  urldate={2017-10-20}
 }
 
 @misc{oltpbench,
@@ -51,6 +84,6 @@
   year = {2017},
   publisher = {GitHub},
   journal = {GitHub repository},
-  url={https://github.com/oltpbenchmark/oltpbench},
-  commit = {4f57d6a0e4c030202a07a60bc1bb1ed1544bf679},
+  url={https://github.com/oltpbenchmark/oltpbench}
 }
+%  commit = {4f57d6a0e4c030202a07a60bc1bb1ed1544bf679}
