@@ -51,7 +51,8 @@ Concurrency is then achieved by handling each request in separate operating syst
 by actually spawning a thread per request or by using a thread pool.
 The sequential handler implementation is easy to understand and extend and
 abstractions for the aforementioned threading models are available in virtually any programming language.
-While more recent developments in language \& library design challenge this approach\footnote{coroutines, async IO, Node.js, Go},
+While more recent developments in language \& library design challenge this approach
+\footnote{Example: coroutines, hybrid threading model, async IO in Node.js, Go, etc.},
 many legacy applications still follow this model, most notably popular database systems such as MySQL.
 
 Recent large-scale profiling at Google \cite{kanev2015profiling} suggests that the memory hierarchy of commodity
