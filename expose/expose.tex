@@ -264,18 +264,26 @@ The evaluation of our implementation must therefore verify that
     \item that our technique actually leads to better net application performance.
 \end{enumerate*}
 
-Performance counters in contemporary Intel CPUs offer rich instrumentation of the memory hierarchy. They can be used as a
-data source for verifying reduced on-core cache misses and are applicable to any type of application.
-In contrast, measuring net performance gain is application-specific and requires domain-specific benchmarks.
-An application benchmark creates a typical workload by sending a realistic mix of $\mathbf{N}$ parallel requests for a
-total time $\mathbf{T_{bench}}$ and recording a set of quality metrics per request.
+Performance counters in modern CPUs offer rich instrumentation of the memory hierarchy,
+allowing verification of the pre-warming effect through the following metrics:
+\begin{enumerate}[label=\emph{(\alph*)}]
+    \item L1-I and L1-D cache misses (private, usually split)
+    \item L2 cache misses (usually private, unified)
+    \item Last-level (L3) cache misses / memory accesses (shared, unified)
+    \item iTLB and dTLB misses
+\end{enumerate}
+It should be noted that performance counter based metrics are application independent and thus applicable to both
+microbenchmarks and customized production codebases.
+
+In contrast, measuring net application performance gain requires domain-specific benchmarks.
+A server application benchmark creates a typical workload by sending a realistic mix of $\mathbf{N}$ parallel requests
+for a total time $\mathbf{T_{bench}}$ and recording a set of quality metrics per request.
 The resulting dataset allows for extraction of the following aggregated metrics per value of $\mathbf{N}$:
 \begin{enumerate}[label=\emph{(\alph*)}]
     \item achieved throughput [requests/sec]
     \item average / min / max request latency [sec]
     \item $n^{th}$ percentile of request latency [sec]
 \end{enumerate}
-\todo{still too vague / too few? Playing with OLTPBench and HammerDB for a few hours didn't yield more ideas...}
 Additionally, for fixed $N$, the development of these metrics over the course of $T_{bench}$ is useful for identifying
 application-level warm-up effects, internal caching, etc.
 
@@ -287,8 +295,8 @@ We explicitly target server applications but the corresponding benchmarks do not
 behavior.
 Thus, executing benchmarks \emph{inside} the OSv VM means that we would either need to adapt the benchmarking code to
 use the staging API or need a special-case in the scheduler.
-Neither of these options is desirable and thus makes black-box benchmarking from the hypervisor an attractive choice.
-At the time of writing we still need to investigated whether performance counters can also be read from the hypervisor
+Neither of these options is desirable and thus makes black-box \emph{benchmarking from the hypervisor} an attractive choice.
+At the time of writing we still need to investigate whether performance counters can also be read from the hypervisor
 and cleanly attributed to a virtual machine.
 
 The three test setups to be compared shall be configured as follows:
