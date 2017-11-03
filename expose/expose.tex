@@ -279,8 +279,6 @@ The resulting dataset allows for extraction of the following aggregated metrics 
 Additionally, for fixed $N$, the development of these metrics over the course of $T_{bench}$ is useful for identifying
 application-level warm-up effects, internal caching, etc.
 
-\todo{mention that SMT enabled yesno should be recorded?}
-
 \subsection{Bechmarking Environment \& Candidates}\label{environment}
 
 Our stage-aware scheduling solution is built into OSv where applications and "OS" code are bundled into an opaque virtual
@@ -300,6 +298,9 @@ The three test setups to be compared shall be configured as follows:
     \item \label{linuxvmsetup} Linux-based VM + unmodified application.
 \end{enumerate}
 The hypervisor is planned to be Linux KVM using \texttt{virtio-*} paravirtualization whenever possible.
+Experiments should record whether simultaneous multithreading (SMT aka \textit{hyperthreading}) is enabled on the system
+and ideally conduct benchmarks for both enabled and disabled SMT.
+We expect reduced cache-misses with SMT disabled but this may need to be weighed against the reduced degree of parallelism.
 
 We recognize that running the Linux setup in a VM may not be a fair comparison:
 OSv \emph{requires} execution in a virtualized environment due to lack of drivers
