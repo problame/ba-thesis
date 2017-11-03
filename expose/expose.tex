@@ -4,6 +4,9 @@
 \usepackage{parskip} % disable indentation for new paragraphs, increased margin-bottom instead
 \usepackage[english]{babel}
 
+\usepackage[style=alphabetic]{biblatex}
+\addbibresource{bib.bib}
+
 \usepackage{hyperref}
 
 \usepackage{todonotes}
@@ -143,7 +146,7 @@ the scheduler since staged scheduling is effectively a scheduling policy.
 
 Scheduler activations promise \cite{schedulerActivations} a general solution for user-space directed scheduling.
 However, practical implementations of scheduler activations in production operating systems have since been
-deprecated or removed in favor of 1:1 threading models\cite{todo}.
+deprecated or removed in favor of 1:1 threading models \cite{schedulerActivationsNetBSD}.
 On the opposite end, a clean implementation in Linux would need to replace the current \emph{completely fair scheduler} (CFS).
 CFS is a system-wide scheduling policy with significant amounts put into it.
 Staged scheduling as proposed in the proof of concept and pursued by this thesis is an application-local policy.
@@ -214,7 +217,7 @@ By scheduling a stage on the same core, the pre-warmed on-core caches and the co
 will lead to a reduction in cache misses and thus better performance.
 The aforementioned stage API is effectively an additional entry point to the OSv scheduler and can be thought of as an
 extended \texttt{sched\_yield(2)}.
-It should be apparent that this idea borrows heavily from \cite{sodaspr,cohort} and \cite{gottschlag2017}.
+It should be apparent that this idea borrows heavily from \cite{sodaspr,cohort}.
 
 To maintain tractability of this problem, we assume a fixed number of $P$ symmetric processors with a uniform memory architecture.
 Expansion our approach to NUMA systems is left open for further research.
@@ -347,10 +350,6 @@ We conclude with a presentation of our evaluation metrics, benchmarking setups a
 
 \clearpage
 
-\todo{fix mysql reference}
-\todo{fix oltp reference}
-\todo{fix gottschlag reference / remove it}
-\bibliographystyle{alpha}
-\bibliography{bib.bib}
+\printbibliography
 
 \end{document}

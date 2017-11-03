@@ -12,7 +12,7 @@
 #   see below
 
 LATEX ?= pdflatex -file-line-error -interaction batchmode
-BIBTEX ?= bibtex8
+BIBER ?= biber
 INKSCAPE_BIN ?= `which inkscape`
 SVG2PDF = $(INKSCAPE_BIN) -A $(2) $(1)
 UMLET_JAR ?= /usr/share/umlet/umlet.jar
@@ -28,7 +28,8 @@ endif
 
 $(DOCNAME).pdf: $(DOCNAME).tex $(DEPS) $(SVGS) $(UMLET_PDFS)
 	${LATEX} $(DOCNAME)
-	${BIBTEX} $(DOCNAME}
+	${BIBER} $(DOCNAME)
+	${LATEX} $(DOCNAME)
 	${LATEX} $(DOCNAME)
 
 $(SVGS): %.pdf: %.svg
