@@ -1,0 +1,115 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[inline]{enumitem}
+\usepackage{parskip} % disable indentation for new paragraphs, increased margin-bottom instead
+\usepackage[english]{babel}
+
+\usepackage[style=alphabetic]{biblatex}
+\addbibresource{bib.bib}
+
+\usepackage{hyperref}
+
+\usepackage{todonotes}
+
+\title{{\large Bachelor Thesis}\\Stage-aware Scheduling in a Library OS}
+\author{Christian Schwarz}
+\date{TODO December 2017 -- TODO March 2018}
+
+\begin{document}
+
+\maketitle
+
+\clearpage
+
+\section{Abstract}
+
+\clearpage
+
+\tableofcontents
+
+\clearpage
+
+\section{Introduction}
+
+\section{Related Work}
+We explain motivation and related work in the field of cache-aware scheduling policies / application architecture.
+This will borrow heaviliy from the expose.
+
+\subsection{Profiling at Google (Kanev et al)}
+\subsection{Memory Hierarchy on Contemporary Server-Class CPUs}
+\subsection{SEDA}
+\subsection{Software Data Spreading}
+\subsection{User-space solution at KIT ITEC OS Group}
+
+\section{Analysis}
+Description of the implementation and and analysis of the problems observed in the user-space solution on Linux:
+\begin{itemize}
+    \item Cache miss rate observably reduced
+    \item However, net performance is worse
+    \item Reason 1: Performance of thread-migration / syscall overhead?
+    \item More important resaon2: policy is not work-conserving:
+        user-space apporach mandates thread migration must happen in userspace,
+        thus threads that become runnable must wait for user space
+    \item => fundamental impplementation problem 1: tight scheduler integration is required for a work-consercing solution.
+    \item => fundamental implementation problem 2: stage definitions are application specific, the entire scheduling policy is application specific => does not fit into the traditional model of whole-system scheduler like Linux CFS
+\end{itemize}
+
+\clearpage
+
+\section{Design \& Implementation}
+In this section, we explain the design and implementation of our solution in the OSv library operating system.
+The first subsection gives a brief introduction to the concepts of library OSes and the differentiators of OSv in this space.
+The remaining subsections present the core ideas of our design and our modifications of OSv to realize them.
+
+\subsection{Overview}
+This section gives an overview of our design --- essentially a one-line summary of the contents of the remaining sub-sections plus some pretty diagarams.
+
+\subsection{The OSv Library Operating System}
+Short intro to OSv library OS:
+\begin{itemize}
+    \item Concept of a library OS: vm = app, no user-kernel-boundary => performance promise
+    \item Linux ABI-compat
+    \item Moderately sized C++ codebase, compact scheduler implementation
+\end{itemize}
+Idea: OSv allows for easier replacement of the entire scheduling policy and and thread migration mechanisms.
+By the nature of a library OS, the changes are kept application-local, leaving fairness considerations up to the hypervisor scheduler (Linux / KVM in our case).
+
+\subsection{Removal of OSv Scheduling Policy}
+\subsection{User-Space API}
+Mention the stack structure.
+\subsection{Fast Thread Migration}
+\subsection{Work Conservation}
+\subsection{Stage-Aware Scheduling Policy}
+
+\clearpage
+\section{Evaluation}
+In this section, we present the evaluation of our design.
+We present our hardware setup and describe how we verify the supposed effects of our design decisions using various benchmarks.
+This section is very closely related to the previous section.
+\subsection{Evaluation Setup}
+\subsection{Fast Thread Migration}
+\subsection{Work Conservation}
+\subsection{Stage-Aware Scheduling Policy}
+
+\section{Conclusion}
+\subsection{Future Work}
+\begin{itemize}
+    \item at ITEC OS Group: automatic profiling \& finding of migration points.
+    \item auto-evaluating scheduler: measure if stage migrations actually make sense by computing a break-even point and continously measuring the result of scheduling decisions using performance conuters.
+    \item NUMA / SMT-aware Scheduling Policy
+    \item MWAIT
+\end{itemize}
+
+\section{Appendix}
+
+\begin{itemize}
+    \item Source code and commit history of our modified version of OSv
+    \item Source code and commit history of our modified version of MySQL 5.6
+    \item Source code and commit history of our microbenchmarks and measurement scripts
+\end{itemize}
+
+\clearpage
+
+\printbibliography
+
+\end{document}
