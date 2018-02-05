@@ -85,21 +85,42 @@ this is not possible because there might still be kernel code that needs to run 
 
 TODO UML sequence diagram visualizing the pathological case described above.
 
+\clearpage
 \section{Analysis}
-Description of the implementation and and analysis of the problems observed in the user-space solution on Linux:
+Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
+The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
+given a re-usable runtime library, patches of a few lines are sufficient to define migration points in applications with a suitable threading model.
+
+Nonetheless, we identify several fundamental problems in the approach taken by the proof-of-concept implementation:
+the requirement for fast thread migration drove the design toward a user-space solution which decouples the threads known by the application (ULTs) from the threads known by the kernel (KLTs).
+However, this change was not paralleled by the introduction of an M:N threading model:
+there still exists one task (KLT) per thread created by the application code.
+The role of KLTs is schizophrenic: for stage migration, KLTs are viewed as the CPUs they are pinned to, because thread migration happens in user space.
+But when a ULT running on a KLT interacts with the Linux kernel, the kernel sees a normal \texttt{task\_struct} and continues to assume the 1:1 threading model.
+This is the software-architectural root cause for the pathological behavior on multi-core systems:
+the kernel --- apart from the solution's kernel component --- has no concept of stages, but this knowledge is required to wake a thread on the right core in a work-conserving manner.
+
+We conclude that the proof-of-concept does not model the situation correctly: the association of stages and CPU cores is piggybacked onto the KLTs using \texttt{sched\_setaffinity}.
+Instead, we argue that stages must be modeled explicitly in the kernel and be separate entities, beneath CPUs and threads:
 \begin{itemize}
-    \item Cache miss rate observably reduced
-    \item However, net performance is worse
-    \item Reason 1: Performance of thread-migration / syscall overhead?
-    \item More important resaon2: policy is not work-conserving:
-        user-space apporach mandates thread migration must happen in userspace,
-        thus threads that become runnable must wait for user space
-    \item => fundamental impplementation problem 1: tight scheduler integration is required for a work-consercing solution.
-    \item => fundamental implementation problem 2: stage definitions are application specific, the entire scheduling policy is application specific => does not fit into the traditional model of whole-system scheduler like Linux CFS
+    \item The associaton of stages and CPU cores must be represented explicity.
+    \item Threads must carry the information in which stage they are executing.
+    \item The scheduler must honor this information by scheduling threads onto cores that are associated with their respective stage.
 \end{itemize}
+This reverts the complex situation of ULTs and KLTs to a simple 1:1 threading model and enables kernel-activity of threads to be handled without policy exceptions or special callbacks from the scheduler.
+
+The price for this arguably cleaner design is the implementation complexity that comes with it:
+the kernel must have a representation of stages, support management of their lifecycle and implement an adaptive scheduling policy for the association of stages and CPU cores.
+Furthermore, a multi-tasking kernel scheduler cannot limit its scheduling goals to the minimiziation of cache misses in a single application:
+global goals such as fairness stay at least equally important and influence the cache state (warm or cold), which in turn influences the usefulness of a stage-aware scheduler.
+
+We conclude that a clean and performant solution for stage-aware scheduling must solve two fundamental problems:
+\begin{enumerate}
+    \item For work-conservation, explicit representation of stages and tight integration into mechanisms like wake-ups on mutexes, condition variables and timers is required.
+    \item The scheduling policy must take cache-state into consideration and trade-off \textit{warm caches through staging} against other scheduling goals.
+\end{enumerate}
 
 \clearpage
-
 \section{Design \& Implementation}
 In this section, we explain the design and implementation of our solution in the OSv library operating system.
 The first subsection gives a brief introduction to the concepts of library OSes and the differentiators of OSv in this space.
