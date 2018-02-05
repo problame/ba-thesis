@@ -136,7 +136,18 @@ Each subsection starts with the reasoning behind our design followed by our impl
 We refer to the relevant commits in the Git repository of our modified version of OSv as appropriate.
 
 \subsection{The OSv Library Operating System}\label{sec:di:osv}
-Short intro to OSv library OS:
+% what is osv, how does it work:
+%       libc + linux ABI => unmodified, existign software runs (mention ports), etc
+%       compact scheduler implementation => see below
+% why OSv for this thesis:
+%    small kernel / scheudler => implementation complexity
+%    virtual machines         => Linux scheduler for fairness goals, our OSv scheduler can focus on optimal stage-aware scheduling
+%
+% Design Deficiencies:
+%           While offloading almost all other design goals to Linux scheduler makes implementation considerably easier,
+%           it is by far not optimal: like all nested dynamic systems, the Linux scheduler and our scheduler can inadvertently work against each other
+%           => for simplicitly, we limit our design to a solution where cores are dedicated to the OSv VM
+
 \begin{itemize}
     \item Concept of a library OS: vm = app, no user-kernel-boundary => performance promise
     \item Linux ABI-compat
@@ -145,12 +156,103 @@ Short intro to OSv library OS:
 Idea: OSv allows for easier replacement of the entire scheduling policy and and thread migration mechanisms.
 By the nature of a library OS, the changes are kept application-local, leaving fairness considerations up to the hypervisor scheduler (Linux / KVM in our case).
 
+\subsubsection{The OSv Scheduler}
+This section highlights implementation details of the upstream OSv scheduler that are required to understand the framework in which our implementation was done.
+For details, we refer to the TODO paper.
+\begin{itemize}
+    \item runqueues + idle thread
+    \item thread pinning => percpu threads
+    \item thread migration mechanism
+    \item thread states => state diagram
+\end{itemize}
+
 \subsection{Removal of OSv Scheduling Policy}\label{sec:di:rmsched}
+% remove load balancing + fairness (cpu time, priority queue / sorted list? )
+% stub out pthreads_sched_setaffinity_np + remove dead thread migration code (why did we do that?)
+% implement simple CPU-local round-robin 
+% describe outcome:
+%   cpu-local runqueues, round robin, non-preemption (OKish because threads always finish, while not really fair...)
+%   existing thread migration mechanism still required by percpu threads, but only on startup
+%   idle threads are always runnable, dequeue incoming migrations per CPU
+%   
 \subsection{User-Space API}\label{sec:di:api}
-Mention the stack structure.
+% Define stages as objects in the kernel
+% User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
+% Stack structure for implementation comfort, describe idea behind stack structure & guards -> spans, like in web browser
 \subsection{Fast Thread Migration}\label{sec:di:mig}
+% Motivation: Stage switch requires migration to other core
+% Existing migration mechanism is based on IPIs, is too slow => results, maybe also compare to Linux => adjust hopper
+% Must be fast, because of opportunity cost calculation:
+%   -> for single client:       cold cache and no migration vs warm cache but migration times
+%   -> for T > #cpus clients: ???
+% Design:
+%       stage migration and hence migration to other CPU core is synchronous to program flow
+%       MPSC queue per CPU, for incoming stage migrations
+%       on stage switch, evaluate CPU allocation policy, pick target CPU, enqueue into stagesched_incoming
+%       target CPU dequeues from stagesched_incoming in idle thread -> mention potential optimization: mwait
+%       Measurement results: why not here??? specifically if we discuss mwait?
+% Implementation:
+%       a stage switch means scheduling out on the source CPU, being migrated to the target CPU and resuming execution there
+%       per-cpu MPSC queue that contains pointers to TCBs of threads in stage migration
+%       cpu idle thread dequeues from mpsc
+%       additional thread states for thread in stage migration
+%       critical race condition:  only after scheduling out on the source CPU must execution continue on the target CPU,
+%           but thread puts itself into the MPSC queue while it is still executing
+%           => augment the thread-switching routine (which is the last code the migrating thread execute on the source CPU) to atomically
+%              switch the state of the thread from stagemig_run to stagemig_sto
+%           => target CPU only dequeues those threads that are in stagemig_sto to its runqueue, others are still executing code on the source CPU
+% => State diagram with changes made in this step
 \subsection{Work Conservation}\label{sec:di:workcons}
+% Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
+%             when a thread is woken up, it will be enqueued inot the runqueue of the CPU where it went to sleep
+%             if that CPU is already executing a thread but another one of the same stage is idle, we do not use the available resources efficiently
+%             the woken thread should be migrated to the idle CPU and immediately resume execution there
+%             important: this is not stage switching, but also needs to evaluate the CPU allocation policy (forward ref!)
+% Design:
+%             on wakeup, evaluate the CPU allocation policy and migrate the woken thread to that CPU using the normal thread migration mechanism
+% Implementation:
+%             wakup is asynchronous, e.g. when from a timer 
+%             we must only migrate a thread when it is stopped, otherwise it's already running and does not need to be woken up
+%             but there are states in which the thread is being woken up while going to sleep
+%             => cleanly encode running vs stopped in the thread state
+%               => more difficult than expected
+%               => extend post-switch-to mechanism with appropriate state transitions
+%               => TODO see git commit
+%               => state diagram with changes made in this step
+%             Afterwards, just use the existing thread migration mechanism TODO check if we can go without the IPIs
+
 \subsection{Stage-Aware Scheduling Policy}\label{sec:di:pol}
+% Motivation: bottleneck stages = stages with more-than-avergage threads in the ready queues of processors assigned to these stages
+%             natural observation: stage needs more CPU time / cores in our case
+%             alterantive formulation (is that correct?):
+%                   the time it takes from begin of stage switch to first dispatch on CPU in new stage should be equal among all stages
+%                   => predictable latencies
+% Design:
+%            among all stages, equalize the number of threads that are currently executing / enqueued in each of them
+%            why?
+%                   => obvious that this eleminiates bottleneck stages
+%                   => idea: in systems with #concurrent_requests > #cpus, 
+%                   => TODO check queueing theory, would be nice to have some actual formulas here ;)
+%
+%            equalizing by giving a busy stage more CPUs / taking CPUs from a non-busy stage
+%            and between the CPUs assigned to a stage, arbitrate by runqueue length
+
+%              => analogy of requests to be handled = water in pipes...?
+%              => a CPU will still have threads from the previous stage in the runqueue: doesn't matter because...
+%                    ...they will be migrated off this CPU as soon as they schedule out / block on IO
+%                    ...round robin ensures the caches are warm for the remaining threads in the old stage
+%                    ... we know the requests will finish processing eventually
+
+% Design Deficiencies:
+%              if the runqueues are long, this system reacts slowy
+%                   => would need to migrate runqueue threads off-cpu 
+%                       => could do this lazily in schedule()
+%
+% Implementation:
+%               track c_in per stage in atomic counters
+%               ... see patch, fairly boring
+%               max_stages, snapshot runqueue counters 
+
 
 \clearpage
 \section{Evaluation}
