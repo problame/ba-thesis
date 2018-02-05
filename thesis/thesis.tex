@@ -1,45 +1,71 @@
-\documentclass[12pt,a4paper]{article}
+\documentclass[12pt,a4paper]{book}
 \usepackage[utf8]{inputenc}
 \usepackage[inline]{enumitem}
 \usepackage{parskip} % disable indentation for new paragraphs, increased margin-bottom instead
-\usepackage[english]{babel}
+\usepackage[american,ngerman]{babel}
+
+\usepackage{kit_style/kitthesiscover}
 
 \usepackage[style=alphabetic]{biblatex}
 \addbibresource{bib.bib}
 
-\usepackage{hyperref}
+\usepackage[%dvipdfm,
+   pdfauthor={Christian Schwarz},
+   pdftitle={Stage-aware Scheduling in a Library OS},
+   pdfsubject={Bachelor Thesis},
+   pdfkeywords={Operating Systems, Library OS, Scheduler, Cache-Affinity}
+]{hyperref}
 
 \usepackage{todonotes}
-
-\title{{\large Bachelor Thesis}\\Stage-aware Scheduling in a Library OS}
-\author{Christian Schwarz}
-\date{TODO December 2017 -- TODO March 2018}
+\usepackage{blindtext}
 
 \begin{document}
+\frontmatter
+\unitlength1cm
+\selectlanguage{american}
 
+\title{Stage-aware Scheduling in a Library~OS}
+\author{cnad. inform. Christian Schwarz}
+\thesistype{Bachelor Thesis}
+\primaryreviewer{Prof.\ Dr.\ Frank Bellosa}
+\advisor{M.\ Sc.\ Mathias Gottschlag}{}
+\thesisbegindate{XX.\ December 2017}
+\thesisenddate{XX.\ March 2018}
 \maketitle
 
-\clearpage
+\input{kit_style/declaration}
 
-\section{Abstract}
+\chapter{Abstract}
+\chapter{Acknowledgments}
 
-\clearpage
-
+\mainmatter
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Contents}
 \tableofcontents
 
-\clearpage
+\chapter{Introduction}
+\blindtext
 
-\section{Introduction}
+\blindtext
 
-\section{Related Work}
+\blindtext
+
+\blindtext
+
+\blindtext
+
+\blindtext
+
+\chapter{Related Work}
 We explain motivation and related work in the field of cache-aware scheduling policies / application architecture.
 This will borrow heaviliy from the expose.
 
-\subsection{Profiling at Google (Kanev et al)}
-\subsection{Memory Hierarchy on Contemporary Server-Class CPUs}
-\subsection{SEDA}
-\subsection{Software Data Spreading}
-\subsection{Protoype in Linux at KIT OS Group}
+\section{Profiling at Google (Kanev et al)}
+\section{Memory Hierarchy on Contemporary Server-Class CPUs}
+\section{SEDA}
+\section{Software Data Spreading}
+\section{Protoype in Linux at KIT OS Group}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
 A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort
 scheduling and software data spreading into a C API that allows for intuitive conversion of existing code bases to
@@ -88,8 +114,7 @@ this is not possible because there might still be kernel code that needs to run 
 
 TODO UML sequence diagram visualizing the pathological case described above.
 
-\clearpage
-\section{Analysis}\label{sec:analysis}
+\chapter{Analysis}\label{ch:analysis}
 Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
 The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
 given a re-usable runtime library, patches of a few lines are sufficient to define migration points in applications with a suitable threading model.
@@ -123,22 +148,21 @@ We conclude that a clean and performant solution for stage-aware scheduling must
     \item The scheduling policy must take cache-state into consideration and trade-off \textit{warm caches through staging} against other scheduling goals.
 \end{enumerate}
 
-\clearpage
-\section{Design \& Implementation}
-In this section, we explain our solution to the problems described in Section~\ref{sec:analysis}.
+\chapter{Design \& Implementation}
+In this section, we explain our solution to the problems described in Section~\ref{ch:analysis}.
 The following enumeration provides an overview of the subsequent subsections:
 \begin{enumerate}
-    \item We implement our solution in the OSv library operating system, which provides Linux-ABI compatibility and runs on Linux/KVM hypervisor.~(Section~\ref{sec:di:osv})
-    \item We remove the existing load balancing and fairness mechanisms from OSv's scheduling policy, replacing it with simple round-robin.~(Section~\ref{sec:di:rmsched})
-    \item We add a user-space API to define stages and switch between them as well as a rudimentary CPU allocation policy for stages.~(Section~\ref{sec:di:api})
-    \item We implement a new thread migration mechanism that does not use inter-processor interrupts (IPIs) and use it for thread migration on stage switch.~(Section~\ref{sec:di:mig})
-    \item We extend the handling of wake-up events for threads that execute in a given stage to migrate to idle CPUs allocated to that stage, making our solution work-conserving on multi-processor systems.~(Section~\ref{sec:di:workcons})
-    \item We replace the rudimentary CPU allocation policy with a solution that aims to equalize the number of threads per stage to avoid bottleneck-stages.~(Section~\ref{sec:di:pol})
+    \item We implement our solution in the OSv library operating system, which provides Linux-ABI compatibility and runs on Linux/KVM hypervisor.~(Section~\ref{ch:di:osv})
+    \item We remove the existing load balancing and fairness mechanisms from OSv's scheduling policy, replacing it with simple round-robin.~(Section~\ref{ch:di:rmsched})
+    \item We add a user-space API to define stages and switch between them as well as a rudimentary CPU allocation policy for stages.~(Section~\ref{ch:di:api})
+    \item We implement a new thread migration mechanism that does not use inter-processor interrupts (IPIs) and use it for thread migration on stage switch.~(Section~\ref{ch:di:mig})
+    \item We extend the handling of wake-up events for threads that execute in a given stage to migrate to idle CPUs allocated to that stage, making our solution work-conserving on multi-processor systems.~(Section~\ref{ch:di:workcons})
+    \item We replace the rudimentary CPU allocation policy with a solution that aims to equalize the number of threads per stage to avoid bottleneck-stages.~(Section~\ref{ch:di:pol})
 \end{enumerate}
 Each subsection starts with the reasoning behind our design followed by our implementation strategy in OSv as well as the refactorings it required.
 We refer to the relevant commits in the Git repository of our modified version of OSv as appropriate.
 
-\subsection{The OSv Library Operating System}\label{sec:di:osv}
+\section{The OSv Library Operating System}\label{ch:di:osv}
 % what is osv, how does it work:
 %       libc + linux ABI => unmodified, existign software runs (mention ports), etc
 %       compact scheduler implementation => see below
@@ -159,7 +183,7 @@ We refer to the relevant commits in the Git repository of our modified version o
 Idea: OSv allows for easier replacement of the entire scheduling policy and and thread migration mechanisms.
 By the nature of a library OS, the changes are kept application-local, leaving fairness considerations up to the hypervisor scheduler (Linux / KVM in our case).
 
-\subsubsection{The OSv Scheduler}
+\subsection{The OSv Scheduler}
 This section highlights implementation details of the upstream OSv scheduler that are required to understand the framework in which our implementation was done.
 For details, we refer to the TODO paper.
 \begin{itemize}
@@ -169,7 +193,7 @@ For details, we refer to the TODO paper.
     \item thread states => state diagram
 \end{itemize}
 
-\subsection{Removal of OSv Scheduling Policy}\label{sec:di:rmsched}
+\section{Removal of OSv Scheduling Policy}\label{ch:di:rmsched}
 % remove load balancing + fairness (cpu time, priority queue / sorted list? )
 % stub out pthreads_sched_setaffinity_np + remove dead thread migration code (why did we do that?)
 % implement simple CPU-local round-robin 
@@ -178,11 +202,13 @@ For details, we refer to the TODO paper.
 %   existing thread migration mechanism still required by percpu threads, but only on startup
 %   idle threads are always runnable, dequeue incoming migrations per CPU
 %   
-\subsection{User-Space API}\label{sec:di:api}
+\blindtext
+\section{User-Space API}\label{ch:di:api}
 % Define stages as objects in the kernel
 % User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
 % Stack structure for implementation comfort, describe idea behind stack structure & guards -> spans, like in web browser
-\subsection{Fast Thread Migration}\label{sec:di:mig}
+\blindtext
+\section{Fast Thread Migration}\label{ch:di:mig}
 % Motivation: Stage switch requires migration to other core
 % Existing migration mechanism is based on IPIs, is too slow => results, maybe also compare to Linux => adjust hopper
 % Must be fast, because of opportunity cost calculation:
@@ -205,7 +231,8 @@ For details, we refer to the TODO paper.
 %              switch the state of the thread from stagemig_run to stagemig_sto
 %           => target CPU only dequeues those threads that are in stagemig_sto to its runqueue, others are still executing code on the source CPU
 % => State diagram with changes made in this step
-\subsection{Work Conservation}\label{sec:di:workcons}
+\blindtext
+\section{Work Conservation}\label{ch:di:workcons}
 % Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
 %             when a thread is woken up, it will be enqueued inot the runqueue of the CPU where it went to sleep
 %             if that CPU is already executing a thread but another one of the same stage is idle, we do not use the available resources efficiently
@@ -223,8 +250,9 @@ For details, we refer to the TODO paper.
 %               => TODO see git commit
 %               => state diagram with changes made in this step
 %             Afterwards, just use the existing thread migration mechanism TODO check if we can go without the IPIs
+\blindtext
 
-\subsection{Stage-Aware Scheduling Policy}\label{sec:di:pol}
+\section{Stage-Aware Scheduling Policy}\label{ch:di:pol}
 % Motivation: bottleneck stages = stages with more-than-avergage threads in the ready queues of processors assigned to these stages
 %             natural observation: stage needs more CPU time / cores in our case
 %             alterantive formulation (is that correct?):
@@ -255,20 +283,20 @@ For details, we refer to the TODO paper.
 %               track c_in per stage in atomic counters
 %               ... see patch, fairly boring
 %               max_stages, snapshot runqueue counters 
+\blindtext
 
-
-\clearpage
-\section{Evaluation}
+\chapter{Evaluation}
 In this section, we present the evaluation of our design.
 We present our hardware setup and describe how we verify the supposed effects of our design decisions using various benchmarks.
 This section is very closely related to the previous section.
-\subsection{Evaluation Setup}
-\subsection{Fast Thread Migration}
-\subsection{Work Conservation}
-\subsection{Stage-Aware Scheduling Policy}
+\section{Evaluation Setup}
+\section{Fast Thread Migration}
+\section{Work Conservation}
+\section{Stage-Aware Scheduling Policy}
 
-\section{Conclusion}
-\subsection{Future Work}
+\chapter{Conclusion}
+\blindtext
+\section{Future Work}
 \begin{itemize}
     \item at ITEC OS Group: automatic profiling \& finding of migration points.
     \item auto-evaluating scheduler: measure if stage migrations actually make sense by computing a break-even point and continously measuring the result of scheduling decisions using performance conuters.
@@ -276,16 +304,19 @@ This section is very closely related to the previous section.
     \item MWAIT
 \end{itemize}
 
-\section{Appendix}
+\backmatter
 
+\chapter{Appendix}
+\blindtext
 \begin{itemize}
     \item Source code and commit history of our modified version of OSv
     \item Source code and commit history of our modified version of MySQL 5.6
     \item Source code and commit history of our microbenchmarks and measurement scripts
 \end{itemize}
 
-\clearpage
-
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Bibliography}
 \printbibliography
 
 \end{document}
