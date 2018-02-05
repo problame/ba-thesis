@@ -86,7 +86,7 @@ this is not possible because there might still be kernel code that needs to run 
 TODO UML sequence diagram visualizing the pathological case described above.
 
 \clearpage
-\section{Analysis}
+\section{Analysis}\label{sec:analysis}
 Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
 The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
 given a re-usable runtime library, patches of a few lines are sufficient to define migration points in applications with a suitable threading model.
@@ -122,14 +122,20 @@ We conclude that a clean and performant solution for stage-aware scheduling must
 
 \clearpage
 \section{Design \& Implementation}
-In this section, we explain the design and implementation of our solution in the OSv library operating system.
-The first subsection gives a brief introduction to the concepts of library OSes and the differentiators of OSv in this space.
-The remaining subsections present the core ideas of our design and our modifications of OSv to realize them.
+In this section, we explain our solution to the problems described in Section~\ref{sec:analysis}.
+The following enumeration provides an overview of the subsequent subsections:
+\begin{enumerate}
+    \item We implement our solution in the OSv library operating system, which provides Linux-ABI compatibility and runs on Linux/KVM hypervisor.~(Section~\ref{sec:di:osv})
+    \item We remove the existing load balancing and fairness mechanisms from OSv's scheduling policy, replacing it with simple round-robin.~(Section~\ref{sec:di:rmsched})
+    \item We add a user-space API to define stages and switch between them as well as a rudimentary CPU allocation policy for stages.~(Section~\ref{sec:di:api})
+    \item We implement a new thread migration mechanism that does not use inter-processor interrupts (IPIs) and use it for thread migration on stage switch.~(Section~\ref{sec:di:mig})
+    \item We extend the handling of wake-up events for threads that execute in a given stage to migrate to idle CPUs allocated to that stage, making our solution work-conserving on multi-processor systems.~(Section~\ref{sec:di:workcons})
+    \item We replace the rudimentary CPU allocation policy with a solution that aims to equalize the number of threads per stage to avoid bottleneck-stages.~(Section~\ref{sec:di:pol})
+\end{enumerate}
+Each subsection starts with the reasoning behind our design followed by our implementation strategy in OSv as well as the refactorings it required.
+We refer to the relevant commits in the Git repository of our modified version of OSv as appropriate.
 
-\subsection{Overview}
-This section gives an overview of our design --- essentially a one-line summary of the contents of the remaining sub-sections plus some pretty diagarams.
-
-\subsection{The OSv Library Operating System}
+\subsection{The OSv Library Operating System}\label{sec:di:osv}
 Short intro to OSv library OS:
 \begin{itemize}
     \item Concept of a library OS: vm = app, no user-kernel-boundary => performance promise
@@ -139,12 +145,12 @@ Short intro to OSv library OS:
 Idea: OSv allows for easier replacement of the entire scheduling policy and and thread migration mechanisms.
 By the nature of a library OS, the changes are kept application-local, leaving fairness considerations up to the hypervisor scheduler (Linux / KVM in our case).
 
-\subsection{Removal of OSv Scheduling Policy}
-\subsection{User-Space API}
+\subsection{Removal of OSv Scheduling Policy}\label{sec:di:rmsched}
+\subsection{User-Space API}\label{sec:di:api}
 Mention the stack structure.
-\subsection{Fast Thread Migration}
-\subsection{Work Conservation}
-\subsection{Stage-Aware Scheduling Policy}
+\subsection{Fast Thread Migration}\label{sec:di:mig}
+\subsection{Work Conservation}\label{sec:di:workcons}
+\subsection{Stage-Aware Scheduling Policy}\label{sec:di:pol}
 
 \clearpage
 \section{Evaluation}
