@@ -117,49 +117,51 @@ TODO UML sequence diagram visualizing the pathological case described above.
 \chapter{Analysis}\label{ch:analysis}
 Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
 The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
-given a re-usable runtime library, patches of a few lines are sufficient to define migration points in applications with a suitable threading model.
+given an application with a suitable threading model, patches of a few lines are sufficient to reduce the cache-miss rate by TODO.
 
 Nonetheless, we identify several fundamental problems in the approach taken by the proof-of-concept implementation:
 the requirement for fast thread migration drove the design toward a user-space solution which decouples the threads known by the application (ULTs) from the threads known by the kernel (KLTs).
-However, this change was not paralleled by the introduction of an M:N threading model:
-there still exists one task (KLT) per thread created by the application code.
-The role of KLTs is schizophrenic: for stage migration, KLTs are viewed as the CPUs they are pinned to, because thread migration happens in user space.
-But when a ULT running on a KLT interacts with the Linux kernel, the kernel sees a normal \texttt{task\_struct} and continues to assume the 1:1 threading model.
-This is the software-architectural root cause for the pathological behavior on multi-core systems:
-the kernel --- apart from the solution's kernel component --- has no concept of stages, but this knowledge is required to wake a thread on the right core in a work-conserving manner.
+However, the kernel scheduler still only handles KLTs and assumes a 1:1 threading model, which leads to an ambiguous role of KLTs in the proof-of-concept:
+when switching between stages, the user space thread migration code views KLTs as the CPUs they are pinned to.
+But when a ULT running on a KLT interacts with the Linux kernel, the kernel sees a normal \texttt{task\_struct} and continues to assume the 1:1 threading model where tasks can just block.
+The proof-of-concept works around this schizophreny by introducing a callback from the scheduler to react to blocking KLTs, but fails to handle asynchronous events like wake-ups.
+The latter leads to the observed pathological behavior on multi-core systems.
 
 We conclude that the proof-of-concept does not model the situation correctly: the association of stages and CPU cores is piggybacked onto the KLTs using \texttt{sched\_setaffinity}.
-Instead, we argue that stages must be modeled explicitly in the kernel and be separate entities, beneath CPUs and threads:
-\begin{itemize}
+Instead, we prpose that stages must be modeled explicitly in the kernel and be separate entities, beneath CPUs and threads:
+\begin{itemize}%
     \item The associaton of stages and CPU cores must be represented explicity.
     \item Threads must carry the information in which stage they are executing.
     \item The scheduler must honor this information by scheduling threads onto cores that are associated with their respective stage.
-\end{itemize}
-This reverts the complex situation of ULTs and KLTs to a simple 1:1 threading model and enables kernel-activity of threads to be handled without policy exceptions or special callbacks from the scheduler.
+    \item The scheduler must trade off the potential gains of always-warm caches against existing scheduling goals such as resource utilization, fairness and response time.
+\end{itemize}%
+This reverts the complex situation of ULTs and KLTs to a simple 1:1 threading model, removing the special-case of blocking kernel activity.
 
-The price for this arguably cleaner design is the implementation complexity that comes with it:
-the kernel must have a representation of stages, support management of their lifecycle and implement an adaptive scheduling policy for the association of stages and CPU cores.
-Furthermore, a multi-tasking kernel scheduler cannot limit its scheduling goals to the minimiziation of cache misses in a single application: % TODO s/multi-tasking/multi-app or multi-tenant/?
-global goals such as fairness stay at least equally important and influence the cache state (warm or cold), which in turn influences the usefulness of a stage-aware scheduler.
-
-We conclude that a clean and performant solution for stage-aware scheduling must solve two fundamental problems:
-\begin{enumerate}
-    \item For work-conservation, explicit representation of stages and tight integration into mechanisms like wake-ups on mutexes, condition variables and timers is required.
-    \item The scheduling policy must take cache-state into consideration and trade-off \textit{warm caches through staging} against other scheduling goals.
-\end{enumerate}
+The remainder of this thesis presents our design as well as its implementation in the OSv library operating system and its evaluation using several microbenchmarks and the TPC-C benchmark against the MySQL database management system.
 
 \chapter{Design \& Implementation}
-In this section, we explain our solution to the problems described in Section~\ref{ch:analysis}.
-The following enumeration provides an overview of the subsequent subsections:
+In this chapter, we present the design and implementation of our solution to the proposal in Chapter~\ref{ch:analysis}.
+Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
+related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
+and demonstrated lower cache miss rates in the MySQL database server, which follows the thread-per-request model with a pool of pre-spawned threads.
+We re-use their tested stage definitions in MySQL \todo{KIT OS group} and focus on the implementation of a work-conserving scheduling policy.
+\cite{kanev2015profiling,mysqlThreading}\todo{KIT OS group}
+
+The limited compatibility with threading models is not a major limitation of our design:
+our approach aims at reaping the benefits of staged computation in legacy applications that cannot be easily refactored to a staged-computation model.
+Thread-pools and per-request threads were the dominant threading model in the last TODO years and are in fact still used in new applications today.
+We acknowledge that more recent runtimes with event-driven concurrency or M:N scheduling models are incompatible with our approach, unless programmers manually construct the supported threading models on top of them.\todo{proof}\todo{discussion section?}
+
+The following enumeration provides an overview of our contributions:
 \begin{enumerate}
     \item We implement our solution in the OSv library operating system, which provides Linux-ABI compatibility and runs on Linux/KVM hypervisor.~(Section~\ref{ch:di:osv})
-    \item We remove the existing load balancing and fairness mechanisms from OSv's scheduling policy, replacing it with simple round-robin.~(Section~\ref{ch:di:rmsched})
-    \item We add a user-space API to define stages and switch between them as well as a rudimentary CPU allocation policy for stages.~(Section~\ref{ch:di:api})
-    \item We implement a new thread migration mechanism that does not use inter-processor interrupts (IPIs) and use it for thread migration on stage switch.~(Section~\ref{ch:di:mig})
-    \item We extend the handling of wake-up events for threads that execute in a given stage to migrate to idle CPUs allocated to that stage, making our solution work-conserving on multi-processor systems.~(Section~\ref{ch:di:workcons})
-    \item We replace the rudimentary CPU allocation policy with a solution that aims to equalize the number of threads per stage to avoid bottleneck-stages.~(Section~\ref{ch:di:pol})
+    \item We remove the existing load balancing and fairness mechanisms from OSv's scheduling policy, replacing it with non-preemptive round-robin per CPU core.~(Section~\ref{ch:di:rmsched})
+    \item We add a user-space API to define stages and switch between them.~(Section~\ref{ch:di:api})
+    \item We implement a fast thread migration mechanism that does not use inter-processor interrupts.~(Section~\ref{ch:di:mig})
+    \item On wake-up of a thread, we load-balance between the CPU cores of its current stage, using thread migration as necessary.~(Section~\ref{ch:di:workcons})
+    \item We add an allocation policy for CPUs to stages that maximizes throughput by removing bottleneck stages.~(Section~\ref{ch:di:pol})
 \end{enumerate}
-Each subsection starts with the reasoning behind our design followed by our implementation strategy in OSv as well as the refactorings it required.
+Each section starts with the reasoning behind our design followed by our implementation strategy in OSv as well as the refactorings it required.
 We refer to the relevant commits in the Git repository of our modified version of OSv as appropriate.
 
 \section{The OSv Library Operating System}\label{ch:di:osv}
