@@ -45,25 +45,55 @@
 \tableofcontents
 
 \chapter{Introduction}
-\blindtext
+Network servers account for a significant percentage of contemporary application software and play a central role in today's public and corporate infrastructure.
+This class of application software is primarily concerned with handling of concurrent requests.
+A common design pattern is to implement a \emph{sequential} handler routine to process each request, consisting of logical stages such as protocol handling, decoding/encoding, actual business logic, etc.
+Concurrency is achieved by executing the handler code per connection in separate operating system thread -- either by spawning a thread per request or by using a thread pool.
+The sequential handler implementation is simple to follow for programmers and abstractions for the aforementioned threading models are available in virtually any programming language and operating system.\todo{ref}
 
-\blindtext
+The dominant CPUs in the server market are \texttt{x86\_64} based Intel processors targeted at the mass market.
+The memory hierarchy of processors since the Haswell microarchitecture features separate 32KiB L1-d and L1-i caches and a unified 256KiB L2 cache per core, as well as a shared inclusive L3 cache that is significantly larger.\todo{ref}
+%Hardware-supported operating system virtualization using KVM or Xen is commonly used to isolate applications both for simplified administration and increased security.
+%Linux is the dominant guest operating system offering a familiar environment and high-performance paravirtualization drivers.
+Recent large-scale profiling at Google suggests that the memory hierarchy of these commodity processors is suboptimal for the server applications they run:
+the request-handlers' instruction working-set does not fit into the on-core caches, ultimately leading to pipeline stalls while the processor waits for slower L3 accesses.\cite{kanev2015profiling}
 
-\blindtext
+Previous work in this field includes techniques such as \emph{cohort scheduling}:
+application code is divided into execution stages and batches of threads (\emph{cohorts}) in the same stage are scheduled in series to reap the benefits of warm instruction caches.
+\emph{Staged event-driven architecture} (SEDA) is an alternative approach: request processing state is encapsulated into an object which is passed through a pipeline of stages.
+Each stage performs its work on the object and enqueues it into the next stage's queue, using a usually fixed number of worker threads.
+If the workers' instruction working sets fit into the on-core caches, instruction-dependent pipeline stalls are greatly reduced.
+SEDA has been implemented in a research DBMS under them term \emph{Steps}, yielding an overall speedup of $1.4$ in the TPC-C benchmark.\cite{cohort,seda,harizopoulos2004steps,harizopoulos2005staged}
 
-\blindtext
+Despite the promising benchmark results of SEDA and Steps, it has not found adoption in popular database management systems such as MySQL, which uses thread-basaed concurrency (one handler per request) with a pre-spawned pool of handler threads.\cite{mysqlThreading}.
+We can only attribute this to the amount of refactoring work it would take to adopt SEDA in MySQL.
+Under the assumption that the amount of refactoring work required for SEDA impedes adoption in many legacy applications, members of the \todo{phrasing} KIT OS group experimented with an approach that requires minimal customization of existing applications:
+the application develpoer defines stages and inserts one-line stage switching calls into the request handling code.
+By dedicating CPU cores to stages and migrating threads between the cores on stage switch, a prototype implementation in Linux reduces instruction cache misses by X\% \todo{data}.
+However, experiments show that the implementation is not work-conserving on multi-processor systems.\todo{ref}
 
-\blindtext
+This thesis shows that proper OS abstractions enable adoption of staged computation in legacy applications with minimal customization effort:
+\begin{itemize}
+    \item We analyze the design and implementation of the Linux proof-of-concept and point out why it is not work-conserving.
+    \item We present OS abstractions and a user-space C++ API for applications to manually define stages and stage switching points in the request-handling code path.
+    \item We present the design and implementation of a work-conserving scheduling policy that allocates CPUs to stages and migrates threads as necessary to preserve warm instruction-caches.
+    \item We show that appropriate stage partitioning and switching points lead to a reduced cache miss rate of X\% in synthetic benchmarks and throughput gains of X\% in a stage-aware version of MySQL under the TPC-C benchmark.\todo{measurement}
+\end{itemize}
 
-\blindtext
+The remainder of this thesis is structured as follows:
+In Chapter~\ref{ch:relwork}, we provide an overview of preceding work in the area of staged computation.
+Chapter~\ref{ch:analysis} dissects the KIT OS group's proof-of-concept implementation and points out why the design is not work conserving.
+Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our solution in the OSv library operating system.
+Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both synthethic microbenchmarks and the TPC-C benchmark against a stage-aware version of MySQL to show the intended cache behavior and performance improvements.
 
-\chapter{Related Work}
+\chapter{Related Work}\label{ch:relwork}
 We explain motivation and related work in the field of cache-aware scheduling policies / application architecture.
 This will borrow heaviliy from the expose.
 
 \section{Profiling at Google (Kanev et al)}
 \section{Memory Hierarchy on Contemporary Server-Class CPUs}
 \section{SEDA}
+\section{STEPS}
 \section{Software Data Spreading}
 \section{Protoype in Linux at KIT OS Group}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
@@ -287,7 +317,7 @@ For details, we refer to the TODO paper.
 %               max_stages, snapshot runqueue counters 
 \blindtext
 
-\chapter{Evaluation}
+\chapter{Evaluation}\label{ch:eval}
 In this section, we present the evaluation of our design.
 We present our hardware setup and describe how we verify the supposed effects of our design decisions using various benchmarks.
 This section is very closely related to the previous section.
@@ -296,7 +326,7 @@ This section is very closely related to the previous section.
 \section{Work Conservation}
 \section{Stage-Aware Scheduling Policy}
 
-\chapter{Conclusion}
+\chapter{Conclusion}\label{ch:concl}
 \blindtext
 \section{Future Work}
 \begin{itemize}
