@@ -81,20 +81,44 @@ This thesis shows that proper OS abstractions enable adoption of staged computat
 \end{itemize}
 
 The remainder of this thesis is structured as follows:
-In Chapter~\ref{ch:relwork}, we provide an overview of preceding work in the area of staged computation.
+In Chapter~\ref{ch:relwork}, we examine preceding work in the area of staged computation.
 Chapter~\ref{ch:analysis} dissects the KIT OS group's proof-of-concept implementation and points out why the design is not work conserving.
 Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our solution in the OSv library operating system.
 Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both synthethic microbenchmarks and the TPC-C benchmark against a stage-aware version of MySQL to show the intended cache behavior and performance improvements.
 
 \chapter{Related Work}\label{ch:relwork}
-We explain motivation and related work in the field of cache-aware scheduling policies / application architecture.
-This will borrow heaviliy from the expose.
+The idea of staged computation has surfaced several times since the early 2000s, motivated by the still growing demand for high-performant network servers.
+This chapter starts with a summary of this preceding work, describing the design and implementation challenges encountered by the respective authors.
+We present implementations of staged computation in research databases that show performance benefits due to reduced i-cache misses and branch prediction.
+We finish our investiation of staged compution by investigating the underwhelming\todo{word} adoption in production systems by analyzing development discussions of popular open-source projects implementing network servers.
+
+Shifting forward several years of research, we present profiling results showing that large instruction-cache footprint is still a major cause of performance bottlenecks in contemporary scale-out applications.
+We summarize existing techniques to spread the \emph{data} working set of a process over multiple CPU caches and finally present an existing prototype at the KIT OS Group that applies the spreading idea to the \emph{instruction} working set of a thread.
+
+\section{Cohort Scheduling}
+\blindtext
+
+\section{SEDA}
+\blindtext
+
+\section{STEPS}
+\blindtext
+
+\section{Adoption of staged computation}
+% NGINX is event-driven, think it counts as such
+% Apache is not event driven, maybe check MLs for analysis of nginx
+% MySQL definitely not, maybe search ML posts for SEDA papers, also check Postgres
+\blindtext
 
 \section{Profiling at Google (Kanev et al)}
+\blindtext
+
 \section{Memory Hierarchy on Contemporary Server-Class CPUs}
-\section{SEDA}
-\section{STEPS}
+\blindtext
+
 \section{Software Data Spreading}
+\blindtext
+
 \section{Protoype in Linux at KIT OS Group}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
 A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort
