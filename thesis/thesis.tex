@@ -96,8 +96,21 @@ We show that our work is relevant for contemporary applications by presenting pr
 We proceed with existing techniques to spread the \emph{data} working set of a process over multiple CPU caches.
 Finally, we conclude with the a summary of the starting point of this thesis --- a prototype implementation at the KIT OS Group that spreads the \emph{instruction} working set of a thread over multiple CPU cores.
 
-\section{Cohort Scheduling}
-\blindtext
+\section{Cohort Scheduling \& Staged Computation}
+We start our investigation of staged execution with \emph{cohort scheduling}~\cite{cohort}:
+the authors measure the cache behavior of I/O intensive online-transaction processing workloads in servers implementing the multi-process / multi-threaded request handling model.
+They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
+the system call itself has a large working set disjoint from the application code and may brings an entirely different working set into the cache when blocking and switching to another thread.
+
+\emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads currently sharing a working set in batches (\emph{cohorts}):
+the first thread in a cohort may incur instruction / data cache misses but all successor of the same cohort benefit from a warm cache.
+Naturally, the threads must yield the CPU before leaving the shared working set.
+The size of a cohort is the central knob\todo{word} in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
+
+For immediate application, systems calls are proposed as pre-existing synchronisation points.
+However, to increase cache locality in arbitrary parts of an application, the authors present the \emph{staged computation} software architecture:
+in this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
+A stage has \emph{scheduling autonomy}, which means it is free to choose the concurrency model that suits the type of provided operation best --- cohort scheduling being just one of several options.
 
 \section{SEDA}
 \blindtext
