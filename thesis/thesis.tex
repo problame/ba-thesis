@@ -87,13 +87,14 @@ Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our 
 Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both synthethic microbenchmarks and the TPC-C benchmark against a stage-aware version of MySQL to show the intended cache behavior and performance improvements.
 
 \chapter{Related Work}\label{ch:relwork}
-The idea of staged computation has surfaced several times since the early 2000s, motivated by the still growing demand for high-performant network servers.
+The idea of staged software architecture has surfaced several times since the early 2000s, motivated by the growing demand for high-performant network servers.
 This chapter starts with a summary of this preceding work, describing the design and implementation challenges encountered by the respective authors.
-We present implementations of staged computation in research databases that show performance benefits due to reduced i-cache misses and branch prediction.
-We finish our investiation of staged compution by investigating the underwhelming\todo{word} adoption in production systems by analyzing development discussions of popular open-source projects implementing network servers.
+We present an application of staged and event-driven architecture (SEDA) in a research database manamgement system and the resulting performance benefits due to reduced i-cache misses and branch prediction.
 
-Shifting forward several years of research, we present profiling results showing that large instruction-cache footprint is still a major cause of performance bottlenecks in contemporary scale-out applications.
-We summarize existing techniques to spread the \emph{data} working set of a process over multiple CPU caches and finally present an existing prototype at the KIT OS Group that applies the spreading idea to the \emph{instruction} working set of a thread.
+Because this thesis proposes an operating-system based approach to reap the same benefits, we investigate why SEDA has not been adopted in open source network servers.
+We show that our work is relevant for contemporary applications by presenting profiling results, showing that large instruction-cache footprint is responsible for CPU pipeline stalls in contemporary scale-out applications.
+We proceed with existing techniques to spread the \emph{data} working set of a process over multiple CPU caches.
+Finally, we conclude with the a summary of the starting point of this thesis --- a prototype implementation at the KIT OS Group that spreads the \emph{instruction} working set of a thread over multiple CPU cores.
 
 \section{Cohort Scheduling}
 \blindtext
