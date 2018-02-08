@@ -89,31 +89,59 @@ Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both syn
 \chapter{Related Work}\label{ch:relwork}
 The idea of staged software architecture has surfaced several times since the early 2000s, motivated by the growing demand for high-performant network servers.
 This chapter starts with a summary of this preceding work, describing the design and implementation challenges encountered by the respective authors.
-We present an application of staged and event-driven architecture (SEDA) in a research database manamgement system and the resulting performance benefits due to reduced i-cache misses and branch prediction.
+We present an application of \emph{staged and event-driven architecture} (SEDA) in a research database manamgement system and the resulting performance benefits due to reduced i-cache misses and branch prediction.
 
 Because this thesis proposes an operating-system based approach to reap the same benefits, we investigate why SEDA has not been adopted in open source network servers.
-We show that our work is relevant for contemporary applications by presenting profiling results, showing that large instruction-cache footprint is responsible for CPU pipeline stalls in contemporary scale-out applications.
+We show that our work is relevant for contemporary applications by presenting profiling results showing that large i-cache footprint is responsible for CPU pipeline stalls in contemporary scale-out applications.
 We proceed with existing techniques to spread the \emph{data} working set of a process over multiple CPU caches.
-Finally, we conclude with the a summary of the starting point of this thesis --- a prototype implementation at the KIT OS Group that spreads the \emph{instruction} working set of a thread over multiple CPU cores.
+Finally, we conclude with the a summary of the starting point of this thesis: a prototype implementation at the KIT OS Group that spreads the \emph{instruction} working set of a thread over multiple CPU cores.
 
-\section{Cohort Scheduling \& Staged Computation}
+\section{Existing Concurrency Models in Network Servers}
+% analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
+% better terminology can be foun din the SEDA paper
+% see flash web server
+% establish terminology like per-request threading, thread pool?
+% flash web terminology => ours
+% multi process / multi threaded = thread per request / thread pool
+
+\section{Cohort Scheduling \& Staged Computation}\label{ch:relwork:cohort}
 We start our investigation of staged execution with \emph{cohort scheduling}~\cite{cohort}:
 the authors measure the cache behavior of I/O intensive online-transaction processing workloads in servers implementing the multi-process / multi-threaded request handling model.
 They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
-the system call itself has a large working set disjoint from the application code and may brings an entirely different working set into the cache when blocking and switching to another thread.
+system calls themselves have a large working set disjoint from the application code and may bring an entirely different working set into the cache when blocking and switching to another thread.
 
 \emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads currently sharing a working set in batches (\emph{cohorts}):
-the first thread in a cohort may incur instruction / data cache misses but all successor of the same cohort benefit from a warm cache.
+the first thread in a cohort may incur instruction / data cache misses but all successors of the same cohort benefit from a warm cache.
 Naturally, the threads must yield the CPU before leaving the shared working set.
 The size of a cohort is the central knob\todo{word} in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
 
 For immediate application, systems calls are proposed as pre-existing synchronisation points.
-However, to increase cache locality in arbitrary parts of an application, the authors present the \emph{staged computation} software architecture:
+However, to increase cache locality in arbitrary parts of an application, the authors present the concept of \emph{staged computation}:
 in this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
 A stage has \emph{scheduling autonomy}, which means it is free to choose the concurrency model that suits the type of provided operation best --- cohort scheduling being just one of several options.
 
-\section{SEDA}
-\blindtext
+\section{Staged Event-Driven Architecture}
+% difference to staged computation: scalabiltiy, graceful degradation, no focus on cache locality
+% formulation: control boundary, page 5 bottem right
+% ease-of-use for application developers
+% ref to cohort scheduling page 6 up left: example for auto-tuning of batrching factor (cohort size)
+% give outlook on OS support for SEDA: specialized OS, no need for transparent resource virtualization as provided by threads
+\emph{Staged event-driven architecture} (SEDA)~\cite{seda} is a software architecture generalizing the idea of staged computation.
+However, the primary motivation for its inception was the construction of network services whose performance should degrade linearly under an increasing number of concurrent requests.
+SEDA provides a framework for application developers to implement an event-driven server by only providing event handlers.
+Each event handler represents a \emph{stage} and is invoked by its \emph{stage controller}, which executes the event handler on the stage's thread pool with input from the stage's \emph{incoming event queue}.
+The event handler can enqueue additional work into other stages' queues, but cannot call into their code directly, enforcing an explicit boundary in the application's control flow.
+The stage controller works in a feedback loop to ensure a stage's performance requirements, for example by adjusting the thread pool / \emph{cohort size} in order to meet a certain response time goal for event handlers.%
+\footnote{SEDA terminology for a resource controller implementing cohort scheduling is \textquote{batching controller}.}
+It cannot be stressed enough that the customizability of the stage controller is central to the whole concept of SEDA:
+application developers are given control over the degree of concurrency and can address performance of code modules through custom stage controllers.
+
+The authors evaluate SEDA by implementing an HTTP server and measuring the performance metrics \emph{total concurrent throughput} and \emph{response time} over a varying number of concurrent clients.
+Additionally, they measure the amount of requests each client completes, defining an equal distribution of service among clients as ideally \emph{fair}. %Jain fairness factor
+The results show 16--20\% higher throughput at little-varying response times and high fairness among clients in comparison to the the multi-threaded Apache web server. % leave out Flash, not interesting to us
+The authors' explanation for these results is that the SEDA server queues all requests \emph{inside} the application while the multi-threaded Apache web server will not accept new client connections when reaching the maximum size of its thread pool, causing exponentially increasing response times for non-accepted clients due to exponential backoff algorithm employed in TCP.~\cite{seda}
+
+%Notably, the authors suggest operating systems should support SEDA natively, emphasized by their need to implement asynchronous I/O abstractions for their resource controllers.\todo{leave out?}
 
 \section{STEPS}
 \blindtext
