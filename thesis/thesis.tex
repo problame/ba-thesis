@@ -89,12 +89,13 @@ Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both syn
 \chapter{Related Work}\label{ch:relwork}
 The idea of staged software architecture has surfaced several times since the early 2000s, motivated by the growing demand for high-performant network servers.
 This chapter starts with a summary of this preceding work, describing the design and implementation challenges encountered by the respective authors.
-We present an application of \emph{staged and event-driven architecture} (SEDA) in a research database manamgement system and the resulting performance benefits due to reduced i-cache misses and branch prediction.
+We present the use of a variation of cohort scheduling in a research database manamgement system and the resulting performance benefits due to reduced i-cache misses and branch prediction.
 
-Because this thesis proposes an operating-system based approach to reap the same benefits, we investigate why SEDA has not been adopted in open source network servers.
-We show that our work is relevant for contemporary applications by presenting profiling results showing that large i-cache footprint is responsible for CPU pipeline stalls in contemporary scale-out applications.
-We proceed with existing techniques to spread the \emph{data} working set of a process over multiple CPU caches.
-Finally, we conclude with the a summary of the starting point of this thesis: a prototype implementation at the KIT OS Group that spreads the \emph{instruction} working set of a thread over multiple CPU cores.
+Because this thesis proposes an operating-system based approach to reap the same benefits, we investigate why cohort scheduling and staged computation has found little adoption in production systems.
+We show that the original motivations of staged computation are still relevant today in scale-out applications.
+We show that our work is relevant by showing the inapplicabiliby of the early 2000s designs to today's multi-processor systems.
+We proceed with the starting points for our solution: a technique to spread the \emph{data} working set of a process over multiple CPU caches followed by a proof-of-concept implementation at the KIT OS group that applies the same principle to its \emph{instruction} working set.
+
 
 \section{Existing Concurrency Models in Network Servers}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
@@ -106,14 +107,14 @@ Finally, we conclude with the a summary of the starting point of this thesis: a 
 
 \section{Cohort Scheduling \& Staged Computation}\label{ch:relwork:cohort}
 We start our investigation of staged execution with \emph{cohort scheduling}~\cite{cohort}:
-the authors measure the cache behavior of I/O intensive online-transaction processing workloads in servers implementing the multi-process / multi-threaded request handling model.
+the authors measure the cache behavior of I/O intensive online-transaction processing (OLTP) workloads in servers implementing the multi-process / multi-threaded request handling model.
 They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
 system calls themselves have a large working set disjoint from the application code and may bring an entirely different working set into the cache when blocking and switching to another thread.
 
 \emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads currently sharing a working set in batches (\emph{cohorts}):
 the first thread in a cohort may incur instruction / data cache misses but all successors of the same cohort benefit from a warm cache.
 Naturally, the threads must yield the CPU before leaving the shared working set.
-The size of a cohort is the central knob\todo{word} in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
+The size of a cohort represents the central tradeoff in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
 
 For immediate application, systems calls are proposed as pre-existing synchronisation points.
 However, to increase cache locality in arbitrary parts of an application, the authors present the concept of \emph{staged computation}:
@@ -133,6 +134,7 @@ Each event handler represents a \emph{stage} and is invoked by its \emph{stage c
 The event handler can enqueue additional work into other stages' queues, but cannot call into their code directly, enforcing an explicit boundary in the application's control flow.
 The stage controller works in a feedback loop to ensure a stage's performance requirements, for example by adjusting the thread pool / \emph{cohort size} in order to meet a certain response time goal for event handlers.%
 \footnote{SEDA terminology for a resource controller implementing cohort scheduling is \textquote{batching controller}.}
+Stage controllers can coordinate to avoid resource overcommitment.
 It cannot be stressed enough that the customizability of the stage controller is central to the whole concept of SEDA:
 application developers are given control over the degree of concurrency and can address performance of code modules through custom stage controllers.
 
@@ -144,13 +146,78 @@ The authors' explanation for these results is that the SEDA server queues all re
 %Notably, the authors suggest operating systems should support SEDA natively, emphasized by their need to implement asynchronous I/O abstractions for their resource controllers.\todo{leave out?}
 
 \section{STEPS}
-\blindtext
+% split up dbms into stages by operators
+% formulate the scheduling trade-off we found, too: response time vs cache efficiencey
+% => make clear we handle this in our scheduling policy by balancing queue lenghts (i.e. adding more CPUs as necessary)
+% in principle cohort scheduling, but with 'production line mode' in mind, this is (not exactly what we do, in theory stages can be entered again...)
+% come to conlcusion that staged system must have dedicated CPUs per stage (p10, 5.3 intro)
+% use ults to switch between threads in a cohort (3.3.1):
+% p8 rechts oben: threads executing same db operation are grouped into teams of so called S-threads, linked in doubly-linked list. at ctx, switch to next entry in linked list => fast, high hit rates
+%                 when an S-thread blocks (yields the CPU), it leaves that team (stray thread)
+% p9: data-dependnet teams where overalp between S-threads is not big enough
+% p9: trick for blocking / yielding threads:
+%       1. intercept block events, remove blocking thread from team list, hint to "regular" (=OS/thread package) scheduler next thread in team-list should be run, continue blocking, will schedule team-list memeber
+%       2. (rechts unten): nur wenn man keine mutex hält wird gescheduled, sonst nicht, weil dann die ganzen anderen thread snicht weiterkommen
+%       => THEY HAD THE SAME PROBLME WE HAD!
+%       => section 4.1.4 reads like they did all modifications to the DB, nothing reusable in other applications
+
+% paper review:
+% 3.1 "Most commercial DBMS involve a light-weight mechanism to pass on CPU control (Shore uses user-level threads)." (trifft bspw. auf MySQL nicht zu)
+The \emph{Synchronized Transactions through Explicit Processor Scheduling} (STEPS) project implements a derivative of cohort scheduling in the research database system SHORE.~\cite{steps,shore}
+
+The authors replicate the observation of \cite{cohort} for database systems: the execution flow exhibits low spatial locality and do not fit into the CPU caches, leading to pipeline stalls and a high amount of mispredicted branches.
+In contrast to cohort scheduling, STEPS groups threads handling a transaction into \emph{team lists} organized by high-level operation (e.g. \texttt{INSERT}, \texttt{UPDATE}, etc).
+The code path of the operation then contains migration points (\textit{\texttt{CTX} calls}) at which the currently executing thread yields control to the next member of its team list, which amounts to user-mode round-robin scheduling within a team.
+Migration points are placed such that the working set between two of them fits into the CPU's L1 i-cache.
+The idea of cohort scheduling is found in the step-wise progression over the long code path of the high-level operation:
+we imagine 3 \todo{num} migration points $A$, $B$ and $C$ and a team of 10 threads executing between $A$ and $B$, operating on a full, warm i-cache.
+Once the last thread reaches $B$, the team moves forward to the next step, $B$ to $C$, where only the first thread incurs the compulsory i-cache misses.
+
+Blocking threads or threads aborting the transaction, would fall behind in this trickle-down schema and thus replace their ex-team members' cache state.
+The solution is to remove threads aborting their transaction or blocking for synchronization and I/O from the team list and track them as \emph{stray threads}.
+The publications on STEPS describe that the thread package in SHORE required modification to support this schema, but falls short on implementation details.
+For this thesis though, blocking is a highly relevant topic because it is a major problem in the proof of concept implementation at KIT OS group (see Section~\ref{ch:relwork:kitpoc} and Chapter~\ref{ch:analysis}).
+By examining the 6.0 release of SHORE which was published after STEPS, we can identify a base class for all DBMS threads called \texttt{sthread\_t} which provides wrappers for basic blocking I/O functions such as the \texttt{read} or \texttt{write} syscalls.
+%Under the assumption that these abstractions existed in the version of SHORE that STEPS is based on, we can imagine that they were used to get notified about potentially blocking I/O requests by a thread in order to remove it from the team list.
+%However, such an approach would not be able to differentiate between an actual block vs. non-blocking retrieval from the page cache and thus cause avoidable collateral damage to the thread requesting I/O.
+%On the other hand, the code footprint of the I/O path could evict the team's working set from the cache --- an argument in favor of indistinguished removal from the team if I/O is pending.
+Under the assumption that these abstractions existed in the version of SHORE that STEPS was based on, we are confident that the STEPS authors used these wrappers to get notified about potentially blocking I/O requests by a thread in order to remove it from its team list.~\cite{shoreRelease}
+
+Regardless of the exact implementation details, we are not convinced that the adoption of STEPS in arbitrary applications requires as few code modifications as claimed by the authors:
+SHORE already comes with a custom thread abstraction around pthreads and centralized wrappers around blocking I/O.
+In contrast, arbitrary applications will use the pthreads and C standard libraries directly, in which case
+\emph{either} substantial modifications to the code base are necessary to establish a situation as found in SHORE
+\emph{or} runtime-patching via \texttt{LD\_PRELOAD} would be required.
+
+Finally, \cite{steps} mentions that STEPS gives a hint to the OS scheduler when a thread blocks in order schedule the next regular team member and maximize the usage of the already warm cache.
+The downside of this approach is that substantial \todo{find proof} code paths in the operating system are not covered by STEPS at all
+--- stray threads will continue to compete for CPU time while they are not blocked.
+An OS scheduler unaware of the team lists may thus schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
 
 \section{Adoption of staged computation}
+% see related work cohort scheduling
 % NGINX is event-driven, think it counts as such
 % Apache is not event driven, maybe check MLs for analysis of nginx
 % MySQL definitely not, maybe search ML posts for SEDA papers, also check Postgres
-\blindtext
+% paper 'duality of operating system structures', das sagt, dass message passing (also im prinzip staged computation) und mulit-threading im prinzip ds selbe ist
+% => beweis, dass stages message passing sind: stagedExecutionDBMS, 4.1 rechts unten: individual servers
+% stagedExecutionDBMS p6 Maintainability
+Maybe leave this sectin out entirely and just use the next section as justification?
+
+\section{Cohort Scheduling on SMP Systems}
+Like all of the previous work presented so far, STEPS was evaluated and built on a single-core machine, with adaption to multi-core systems not mentioned at all or staying theoretical.~\cite{steps,harizopoulos2003case}
+This section argues that the concept of cohort scheduling and STEPS fails on multi-processor systems.
+
+As discussed in Section~\ref{ch:relwork:cohort}, the scheduling tradeoff in cohort scheduling consists of reduced cache misses vs. increased response time due to batching.
+On single core systems, cohort scheduling and STEPS time-multiplexe the \emph{single} L1 i-cache more efficiently than traditional OS schedulers, leading to performance benefits.
+However, contemporary multi-core machines provide private caches \emph{per core} and allow for real parallelism of threads.
+The OS scheduler is usually tasked with load-balancing between these cores for maximum resource utilization.
+However, load balancing requires thread migration, which generally implies that the migrated thread will incur cache misses on the target CPU.
+STEPS would need to influence the load balancer in order to favor threads of the same team to stay on the same core but expand to another core onoce the break-even point between \textit{speedup by warm cache} and \textit{speedup by real parallelism} is hit.
+But even in this scenario, the OS would time-multiplex each CPU cores, leading to cache-misses between different teams.
+\todo{finish this...}
+\todo{affinity scheudling paper? just ignore it?}
+
 
 \section{Profiling at Google (Kanev et al)}
 \blindtext
@@ -161,7 +228,7 @@ The authors' explanation for these results is that the SEDA server queues all re
 \section{Software Data Spreading}
 \blindtext
 
-\section{Protoype in Linux at KIT OS Group}
+\section{Protoype in Linux at KIT OS Group}\label{ch:relwork:kitpoc}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
 A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort
 scheduling and software data spreading into a C API that allows for intuitive conversion of existing code bases to
