@@ -3,6 +3,7 @@
 \usepackage[inline]{enumitem}
 \usepackage{parskip} % disable indentation for new paragraphs, increased margin-bottom instead
 \usepackage[american,ngerman]{babel}
+\usepackage{csquotes}
 
 \usepackage{kit_style/kitthesiscover}
 
@@ -59,18 +60,21 @@ Recent large-scale profiling at Google suggests that the memory hierarchy of the
 the request-handlers' instruction working-set does not fit into the on-core caches, ultimately leading to pipeline stalls while the processor waits for slower L3 accesses.\cite{kanev2015profiling}
 
 Previous work in this field includes techniques such as \emph{cohort scheduling}:
-application code is divided into execution stages and batches of threads (\emph{cohorts}) in the same stage are scheduled in series to reap the benefits of warm instruction caches.
-\emph{Staged event-driven architecture} (SEDA) is an alternative approach: request processing state is encapsulated into an object which is passed through a pipeline of stages.
-Each stage performs its work on the object and enqueues it into the next stage's queue, using a usually fixed number of worker threads.
-If the workers' instruction working sets fit into the on-core caches, instruction-dependent pipeline stalls are greatly reduced.
-SEDA has been implemented in a research DBMS under them term \emph{Steps}, yielding an overall speedup of $1.4$ in the TPC-C benchmark.\cite{cohort,seda,harizopoulos2004steps,harizopoulos2005staged}
+threads in the same working set are grouped into \emph{cohorts} and dispatched in series to reap the benefits of warm instruction caches.
+If the shared working set fits into the on-core caches, instruction-dependent pipeline stalls are greatly reduced.
+\emph{Staged Computation} brings this concept to general software architecture and \emph{staged event-driven architectures} (SEDA) generalize it further:
+request processing state is encapsulated into an object which is passed through a pipeline of stages interconnected by queues.
+Each stage controls the concurrency model used to perform its work, allowing cohort scheduling to be employed.
+A derivative of cohort scheduling has been implemented in a research DBMS under them term \emph{STEPS}, yielding an overall speedup of $1.4$ in the TPC-C benchmark.\cite{cohort,seda,steps,harizopoulos2005staged}
 
-Despite the promising benchmark results of SEDA and Steps, it has not found adoption in popular database management systems such as MySQL, which uses thread-basaed concurrency (one handler per request) with a pre-spawned pool of handler threads.\cite{mysqlThreading}.
-We can only attribute this to the amount of refactoring work it would take to adopt SEDA in MySQL.
-Under the assumption that the amount of refactoring work required for SEDA impedes adoption in many legacy applications, members of the \todo{phrasing} KIT OS group experimented with an approach that requires minimal customization of existing applications:
-the application develpoer defines stages and inserts one-line stage switching calls into the request handling code.
+Despite promising results of above research, it has found little adoption in popular database management systems such as MySQL, which uses thread-basaed concurrency (one handler per request) with a pre-spawned pool of handler threads.\cite{mysqlThreading}.
+% TODO relevance of research for cohort on SMP 
+% TODO next line maybe leave it out
+By analyzing project development discussions, we show that the complex refactoring needed to adopt staged computation has been limiting its adoption in legacy applications TODO such as.
+We present experimental work at the KIT OS group showing an approach to staged computation that requires minimal customization of existing applications:
+the application develper manually defines stages and inserts one-line stage switching calls into the request handling code.
 By dedicating CPU cores to stages and migrating threads between the cores on stage switch, a prototype implementation in Linux reduces instruction cache misses by X\% \todo{data}.
-However, experiments show that the implementation is not work-conserving on multi-processor systems.\todo{ref}
+However, experiments show that the prototype is not work-conserving on multi-processor systems.\todo{ref}
 
 This thesis shows that proper OS abstractions enable adoption of staged computation in legacy applications with minimal customization effort:
 \begin{itemize}
@@ -220,6 +224,7 @@ But even in this scenario, the OS would time-multiplex each CPU cores, leading t
 
 
 \section{Profiling at Google (Kanev et al)}
+% alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
 \blindtext
 
 \section{Memory Hierarchy on Contemporary Server-Class CPUs}
@@ -361,7 +366,7 @@ For details, we refer to the TODO paper.
 \section{Removal of OSv Scheduling Policy}\label{ch:di:rmsched}
 % remove load balancing + fairness (cpu time, priority queue / sorted list? )
 % stub out pthreads_sched_setaffinity_np + remove dead thread migration code (why did we do that?)
-% implement simple CPU-local round-robin 
+% implement simple CPU-local non-preeemptive round-robin: non-preemptive is ok because handlers will finish and is good for cache performance (see stagedExecutionDBMS, p5 up left, p10 5.1.2)
 % describe outcome:
 %   cpu-local runqueues, round robin, non-preemption (OKish because threads always finish, while not really fair...)
 %   existing thread migration mechanism still required by percpu threads, but only on startup
@@ -418,6 +423,9 @@ For details, we refer to the TODO paper.
 \blindtext
 
 \section{Stage-Aware Scheduling Policy}\label{ch:di:pol}
+% TODO read harizopoulos, affninity scheduligng in staged servers and make sure we are not in stark contrast to their results... one argument for that could be that they focus on single CPUs and only have stiefmütterlich solution for mulitple CPUs (see section 6)
+% Difference to STEPS: we target multi- to manycore go conceptually, 
+
 % Motivation: bottleneck stages = stages with more-than-avergage threads in the ready queues of processors assigned to these stages
 %             natural observation: stage needs more CPU time / cores in our case
 %             alterantive formulation (is that correct?):
@@ -458,7 +466,14 @@ This section is very closely related to the previous section.
 \section{Fast Thread Migration}
 \section{Work Conservation}
 \section{Stage-Aware Scheduling Policy}
-
+MySQL Migration points:
+    manual: why should one use relational operatos? comparibility with staged DBMS paper
+    with mathias' simulation: because it's better, show the advantage => check on mathias' paper once it is published
+% alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction and page 4'
+% TODO compare I-cache missesa and mispred branches with Steps, who claim that, see steps, p2 rechts oben => 30 warehouses!
+% steps paper 4.2 intro explains TPC-C
+% mentio nwe run on ramdisk, does I/O actually block? how often? 
+% der steps graph (figure 7) sieht ziemlich aehnlich aus
 \chapter{Conclusion}\label{ch:concl}
 \blindtext
 \section{Future Work}
@@ -467,6 +482,7 @@ This section is very closely related to the previous section.
     \item auto-evaluating scheduler: measure if stage migrations actually make sense by computing a break-even point and continously measuring the result of scheduling decisions using performance conuters.
     \item NUMA / SMT-aware Scheduling Policy
     \item MWAIT
+    \item Backpressure (like in SEDA / staged DBMS) to our design? does that make sense?
 \end{itemize}
 
 \backmatter
