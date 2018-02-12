@@ -95,14 +95,14 @@ High-performance network servers must handle requests at a degree of concurrency
 Much research has gone into techniques to handle this problem, further constrained by additional requirements such as predictable response times and fairness among clients.
 This chapter starts with an overview of the prevalent concurrency models in the early 2000s' software landscape.
 We proceed with an introduction to \emph{cohort scheduling} and \emph{staged computation} which stem from the same time period
-and present an application of these proposals to a research database management system, resulting in significant performance benefits due to reduced i-cache misses and better branch prediction results.
+and present an application of these proposals to a research database management system, resulting in significant performance improvements due to reduced i-cache misses and better branch prediction.
 
-Motivated by recent profiling work of scale-out applications, proving that their instruction cache footprint is cause for major performance bottlenecks on contemporary CPUs,
+Motivated by recent profiling work at Google datacenters which proves that scale-out applications' large instruction cache footprint is still cause for major performance bottlenecks on contemporary CPUs,
 we investigate the stagnant adoption of above techniques in today's production software systems and find assumptions made in the early 2000s' designs that no longer hold on today's SMP systems and memory hierarchies.
 
-We finish this chapter with the starting point for this thesis:
-given the \emph{software data spreading} technique which spreads the \emph{data} cache footprint of an application over multiple cores,
-we present a proof-of-concept implementation at the KIT OS group, which applies the idea of software data spreading to the \emph{instruction} cache footprint of an application.
+A solution to use the memory hierarchy on SMP systems more effectively has already been published under the name \emph{computation spreading}:
+this approach executes OS code on different CPU cores than user-level code by migrating threads on synchronous kernel entry, effectively spreading the instruction working set of OS-intensive applications.
+We conclude with a proof-of-concept implementation at the KIT OS group which implements computation spreading to arbitrary separation points in the application code.
 
 \section{Concurrency Models in the Early 2000s}\label{ch:relwork:conmod}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
@@ -257,14 +257,31 @@ But even in this scenario, the OS would time-multiplex each CPU cores, leading t
 \todo{finish this...}
 \todo{affinity scheudling paper? just ignore it?}
 
+\section{Computation Spreading}
+% TODO: related and actually more relevant to our approach: Computation Spreading
+% => term: destructive interference
+% => migration for syscall => split i-working set (naturally) + little communication (because sendfile)
+{\footnotesize This section summarizes \cite{compspr}.} % TODO should become a sub-heading
 
-\section{Software Data Spreading}
-\blindtext
+\emph{Computation spreading} (CSP) in its most general form is a technique to cache the instruction working set of a process more effectively on SMP systems which commonly feature private caches per core.
+\citeauthor*{compspr} show that this cache hierarchy leads to rendundantly stored code.
+For example, in a traditional thread-based concurrency model, each request-handling thread may interact with the file system through system calls which leads to redundantly stored file system code being in each core's private cache.
+The authors present a solution that temporarily assigns CPU cores to either execute OS code or user-level code, exploring and evaluating several allocation policies.
+Threads entering or leaving the OS synchronously through syscalls, exceptions or page faults are then migrated between compatible cores.
+The implementation is based on hardware virtualization allowing for interception of above kernel entries without modifying the (guest) OS or user-space as well as a hardware-provided thread migration mechanism.
+Naturally, this concept requires control or at least cooperation of the software executing in hypervisor mode.
+
+The authors evaluate their solution using full-system simulation of an eight-core machine with private L1 and L2 cache and a shared L3 cache.
+Server applications, which are of primary interest for this thesis, exhibit 25 -- 58\% fewer L2 instruction misses and 9 -- 25\% improved branch misprediction rates.
+Data read misses are less acffected, with only 13 -- 19\% decrease for Apache web server and an OLTP application.\todo{leave sentence out?}
+The approach leads to a speed-up of up to 20\% in Apache and 9.4\% in OLTP measured by the total runtime of the full-system simulation.
+
+Despite the very specific implementation, the general concept presented by the authors is more general and not limited to the syscall interface, suggesting arbitrary migration points and corresponding core allocation policies.
 
 \section{Protoype in Linux at KIT OS Group}\label{ch:relwork:kitpoc}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
 A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort
-scheduling and software data spreading into a C API that allows for intuitive conversion of existing code bases to
+scheduling and computation spreading into a C API that allows for intuitive conversion of existing code bases to
 staged execution:
 The developer manually identifies stages and inserts library calls into application code for switching the current stage.
 Each CPU core is assigned one or more stages and each time a thread switches to a new stage, it is migrated to a core
@@ -498,7 +515,7 @@ MySQL Migration points:
     manual: why should one use relational operatos? comparibility with staged DBMS paper
     with mathias' simulation: because it's better, show the advantage => check on mathias' paper once it is published
 % alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction and page 4'
-% TODO compare I-cache missesa and mispred branches with Steps, who claim that, see steps, p2 rechts oben => 30 warehouses!
+% TODO compare I-cache missesa and mispred branches with Steps and compspr, who claim that, see steps, p2 rechts oben => 30 warehouses!
 % steps paper 4.2 intro explains TPC-C
 % mentio nwe run on ramdisk, does I/O actually block? how often? 
 % der steps graph (figure 7) sieht ziemlich aehnlich aus
