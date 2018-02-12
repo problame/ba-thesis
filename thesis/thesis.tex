@@ -104,7 +104,7 @@ We finish this chapter with the starting point for this thesis:
 given the \emph{software data spreading} technique which spreads the \emph{data} cache footprint of an application over multiple cores,
 we present a proof-of-concept implementation at the KIT OS group, which applies the idea of software data spreading to the \emph{instruction} cache footprint of an application.
 
-\section{Concurrency Models in the Early 2000s}
+\section{Concurrency Models in the Early 2000s}\label{ch:relwork:conmod}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
 % better terminology can be foun din the SEDA paper
 % see flash web server
@@ -114,7 +114,7 @@ we present a proof-of-concept implementation at the KIT OS group, which applies 
 \blindtext
 
 \section{Cohort Scheduling \& Staged Computation}\label{ch:relwork:cohort}
-We start our investigation of staged execution with \emph{cohort scheduling}~\cite{cohort}:
+We start our investigation of staged execution with \emph{cohort scheduling}, dating back to the early 2000s:
 the authors measure the cache behavior of I/O intensive online-transaction processing (OLTP) workloads in servers implementing the multi-process / multi-threaded request handling model.
 They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
 system calls themselves have a large working set disjoint from the application code and may bring an entirely different working set into the cache when blocking and switching to another thread.
@@ -122,7 +122,7 @@ system calls themselves have a large working set disjoint from the application c
 \emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads currently sharing a working set in batches (\emph{cohorts}):
 the first thread in a cohort may incur instruction / data cache misses but all successors of the same cohort benefit from a warm cache.
 Naturally, the threads must yield the CPU before leaving the shared working set.
-The size of a cohort represents the central tradeoff in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
+The size of a cohort represents the central tradeoff in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.~\cite{cohort}
 
 For immediate application, systems calls are proposed as pre-existing synchronisation points.
 However, to increase cache locality in arbitrary parts of an application, the authors present the concept of \emph{staged computation}:
@@ -153,7 +153,7 @@ The authors' explanation for these results is that the SEDA server queues all re
 
 %Notably, the authors suggest operating systems should support SEDA natively, emphasized by their need to implement asynchronous I/O abstractions for their resource controllers.\todo{leave out?}
 
-\section{STEPS}
+\section{STEPS}\label{ch:relwork:steps}
 % split up dbms into stages by operators
 % formulate the scheduling trade-off we found, too: response time vs cache efficiencey
 % => make clear we handle this in our scheduling policy by balancing queue lenghts (i.e. adding more CPUs as necessary)
@@ -202,6 +202,37 @@ The downside of this approach is that substantial \todo{find proof} code paths i
 --- stray threads will continue to compete for CPU time while they are not blocked.
 An OS scheduler unaware of the team lists may thus schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
 
+\section{Memory Hierarchy on Contemporary Server-Class CPUs}
+% All numbers by example: My Haswell against STEPS CPU
+% L1 and L2 are now oncore, L3 is shared (and inclusive on Intel)
+% In contrast: early 2000s processors were single-core, L1 and L2
+% capacities of L2 now what we have in L2 on-core
+% today's L1 is split 32KiB i- and d-cache, early 2000s L1 64KiB (shared / unified?)  
+
+\section{Profiling Datacenter Applications}
+% alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
+% dominant are the d-cache misses, but i-cache misses are also significantly higher than usual 
+% growth of i-cache working set over time (speculation: due to product development) => worsens situation
+% => stall cycles, X %
+% memory latency, not band width
+While the micro-architectural performance problems caused by large i-cache footprints were already observed by \cite{cohort} and \cite{steps} in the early 2000s,
+recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
+However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation:
+\citeauthor{kanev2015profiling} identify significantly higher amount of pipeline stalls in real-world datacenter software when compared to the SPEC CPU2006 benchmark.
+Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
+a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
+the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
+In particular, the authors find that more than 5\% of cycles starved on empty front-end buffers, which is attributed to i-cache misses in the on-core L2 cache, resulting in slow off-core accesses to the CPU's last level cache.
+Additionally, the instruction working set of applications is shown to grow significantly over their active develpoment time, worsening the situation.%
+\footnote{\cite{kanev2015profiling} shows examplary results of up to 27\% per year}
+The authors do not provide explicit reasons for the abnormal size of the instruction working sets, only mentioning \textquote{lukewarm} code and static linking as possible contributors.~\cite{kanev2015profiling}
+
+In comparison to the work published a decade earlier (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}),
+\citeauthor{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
+approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU time in the scheduler alone.
+Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
+Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.
+
 \section{Adoption of staged computation}
 % see related work cohort scheduling
 % NGINX is event-driven, think it counts as such
@@ -226,13 +257,6 @@ But even in this scenario, the OS would time-multiplex each CPU cores, leading t
 \todo{finish this...}
 \todo{affinity scheudling paper? just ignore it?}
 
-
-\section{Profiling at Google (Kanev et al)}
-% alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
-\blindtext
-
-\section{Memory Hierarchy on Contemporary Server-Class CPUs}
-\blindtext
 
 \section{Software Data Spreading}
 \blindtext
