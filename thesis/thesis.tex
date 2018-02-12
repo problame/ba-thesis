@@ -218,7 +218,7 @@ An OS scheduler unaware of the team lists may thus schedule a stray threads in t
 While the micro-architectural performance problems caused by large i-cache footprints were already observed by \cite{cohort} and \cite{steps} in the early 2000s,
 recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
 However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation:
-\citeauthor{kanev2015profiling} identify significantly higher amount of pipeline stalls in real-world datacenter software when compared to the SPEC CPU2006 benchmark.
+\citeauthor*{kanev2015profiling} identify significantly higher amount of pipeline stalls in real-world datacenter software when compared to the SPEC CPU2006 benchmark.
 Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
 a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
 the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
@@ -228,7 +228,7 @@ Additionally, the instruction working set of applications is shown to grow signi
 The authors do not provide explicit reasons for the abnormal size of the instruction working sets, only mentioning \textquote{lukewarm} code and static linking as possible contributors.~\cite{kanev2015profiling}
 
 In comparison to the work published a decade earlier (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}),
-\citeauthor{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
+\citeauthor*{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
 approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU time in the scheduler alone.
 Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
 Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.
