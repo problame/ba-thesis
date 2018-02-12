@@ -91,23 +91,27 @@ Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our 
 Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both synthethic microbenchmarks and the TPC-C benchmark against a stage-aware version of MySQL to show the intended cache behavior and performance improvements.
 
 \chapter{Related Work}\label{ch:relwork}
-The idea of staged software architecture has surfaced several times since the early 2000s, motivated by the growing demand for high-performant network servers.
-This chapter starts with a summary of this preceding work, describing the design and implementation challenges encountered by the respective authors.
-We present the use of a variation of cohort scheduling in a research database manamgement system and the resulting performance benefits due to reduced i-cache misses and branch prediction.
+High-performance network servers must handle requests at a degree of concurrency that exceeds the real parallelism provided by hardware in the form of CPU cores.
+Much research has gone into techniques to handle this problem, further constrained by additional requirements such as predictable response times and fairness among clients.
+This chapter starts with an overview of the prevalent concurrency models in the early 2000s' software landscape.
+We proceed with an introduction to \emph{cohort scheduling} and \emph{staged computation} which stem from the same time period
+and present an application of these proposals to a research database management system, resulting in significant performance benefits due to reduced i-cache misses and better branch prediction results.
 
-Because this thesis proposes an operating-system based approach to reap the same benefits, we investigate why cohort scheduling and staged computation has found little adoption in production systems.
-We show that the original motivations of staged computation are still relevant today in scale-out applications.
-We show that our work is relevant by showing the inapplicabiliby of the early 2000s designs to today's multi-processor systems.
-We proceed with the starting points for our solution: a technique to spread the \emph{data} working set of a process over multiple CPU caches followed by a proof-of-concept implementation at the KIT OS group that applies the same principle to its \emph{instruction} working set.
+Motivated by recent profiling work of scale-out applications, proving that their instruction cache footprint is cause for major performance bottlenecks on contemporary CPUs,
+we investigate the stagnant adoption of above techniques in today's production software systems and find assumptions made in the early 2000s' designs that no longer hold on today's SMP systems and memory hierarchies.
 
+We finish this chapter with the starting point for this thesis:
+given the \emph{software data spreading} technique which spreads the \emph{data} cache footprint of an application over multiple cores,
+we present a proof-of-concept implementation at the KIT OS group, which applies the idea of software data spreading to the \emph{instruction} cache footprint of an application.
 
-\section{Existing Concurrency Models in Network Servers}
+\section{Concurrency Models in the Early 2000s}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
 % better terminology can be foun din the SEDA paper
 % see flash web server
 % establish terminology like per-request threading, thread pool?
 % flash web terminology => ours
 % multi process / multi threaded = thread per request / thread pool
+\blindtext
 
 \section{Cohort Scheduling \& Staged Computation}\label{ch:relwork:cohort}
 We start our investigation of staged execution with \emph{cohort scheduling}~\cite{cohort}:
