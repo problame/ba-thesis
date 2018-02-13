@@ -20,6 +20,11 @@
 \usepackage{todonotes}
 \usepackage{blindtext}
 
+\usepackage{xparse}
+\NewDocumentCommand{\sectionsubheading}{m}{%
+    {\vspace{-0.7cm}\footnotesize #1 \vspace{0.25em}}\par%
+}
+
 \begin{document}
 \frontmatter
 \unitlength1cm
@@ -104,7 +109,14 @@ A solution to use the memory hierarchy on SMP systems more effectively has alrea
 this approach executes OS code on different CPU cores than user-level code by migrating threads on synchronous kernel entry, effectively spreading the instruction working set of OS-intensive applications.
 We conclude with a proof-of-concept implementation at the KIT OS group which implements computation spreading to arbitrary separation points in the application code.
 
-\section{Concurrency Models in the Early 2000s}\label{ch:relwork:conmod}
+\NewDocumentCommand{\relworksection}{m m g}{
+    \section{#1}\label{#2}
+    \IfValueT{#3}{%
+        \sectionsubheading{This section summarizes \cite{#3} by \citeauthor*{#3}.}
+    }%
+}
+
+\relworksection{Concurrency Models in the Early 2000s}{ch:relwork:conmod}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
 % better terminology can be foun din the SEDA paper
 % see flash web server
@@ -113,7 +125,7 @@ We conclude with a proof-of-concept implementation at the KIT OS group which imp
 % multi process / multi threaded = thread per request / thread pool
 \blindtext
 
-\section{Cohort Scheduling \& Staged Computation}\label{ch:relwork:cohort}
+\relworksection{Cohort Scheduling \& Staged Computation}{ch:relwork:cohort}{cohort}
 We start our investigation of staged execution with \emph{cohort scheduling}, dating back to the early 2000s:
 the authors measure the cache behavior of I/O intensive online-transaction processing (OLTP) workloads in servers implementing the multi-process / multi-threaded request handling model.
 They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
@@ -122,20 +134,20 @@ system calls themselves have a large working set disjoint from the application c
 \emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads currently sharing a working set in batches (\emph{cohorts}):
 the first thread in a cohort may incur instruction / data cache misses but all successors of the same cohort benefit from a warm cache.
 Naturally, the threads must yield the CPU before leaving the shared working set.
-The size of a cohort represents the central tradeoff in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.~\cite{cohort}
+The size of a cohort represents the central tradeoff in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
 
 For immediate application, systems calls are proposed as pre-existing synchronisation points.
 However, to increase cache locality in arbitrary parts of an application, the authors present the concept of \emph{staged computation}:
 in this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
 A stage has \emph{scheduling autonomy}, which means it is free to choose the concurrency model that suits the type of provided operation best --- cohort scheduling being just one of several options.
 
-\section{Staged Event-Driven Architecture}
+\relworksection{Staged Event-Driven Architecture}{ch:relwork:seda}{seda}
 % difference to staged computation: scalabiltiy, graceful degradation, no focus on cache locality
 % formulation: control boundary, page 5 bottem right
 % ease-of-use for application developers
 % ref to cohort scheduling page 6 up left: example for auto-tuning of batrching factor (cohort size)
 % give outlook on OS support for SEDA: specialized OS, no need for transparent resource virtualization as provided by threads
-\emph{Staged event-driven architecture} (SEDA)~\cite{seda} is a software architecture generalizing the idea of staged computation.
+\emph{Staged event-driven architecture} (SEDA) is a software architecture generalizing the idea of staged computation.
 However, the primary motivation for its inception was the construction of network services whose performance should degrade linearly under an increasing number of concurrent requests.
 SEDA provides a framework for application developers to implement an event-driven server by only providing event handlers.
 Each event handler represents a \emph{stage} and is invoked by its \emph{stage controller}, which executes the event handler on the stage's thread pool with input from the stage's \emph{incoming event queue}.
@@ -149,11 +161,11 @@ application developers are given control over the degree of concurrency and can 
 The authors evaluate SEDA by implementing an HTTP server and measuring the performance metrics \emph{total concurrent throughput} and \emph{response time} over a varying number of concurrent clients.
 Additionally, they measure the amount of requests each client completes, defining an equal distribution of service among clients as ideally \emph{fair}. %Jain fairness factor
 The results show 16--20\% higher throughput at little-varying response times and high fairness among clients in comparison to the the multi-threaded Apache web server. % leave out Flash, not interesting to us
-The authors' explanation for these results is that the SEDA server queues all requests \emph{inside} the application while the multi-threaded Apache web server will not accept new client connections when reaching the maximum size of its thread pool, causing exponentially increasing response times for non-accepted clients due to exponential backoff algorithm employed in TCP.~\cite{seda}
+The authors' explanation for these results is that the SEDA server queues all requests \emph{inside} the application while the multi-threaded Apache web server will not accept new client connections when reaching the maximum size of its thread pool, causing exponentially increasing response times for non-accepted clients due to exponential backoff algorithm employed in TCP.
 
 %Notably, the authors suggest operating systems should support SEDA natively, emphasized by their need to implement asynchronous I/O abstractions for their resource controllers.\todo{leave out?}
 
-\section{STEPS}\label{ch:relwork:steps}
+\relworksection{STEPS}{ch:relwork:steps}{steps}
 % split up dbms into stages by operators
 % formulate the scheduling trade-off we found, too: response time vs cache efficiencey
 % => make clear we handle this in our scheduling policy by balancing queue lenghts (i.e. adding more CPUs as necessary)
@@ -171,7 +183,7 @@ The authors' explanation for these results is that the SEDA server queues all re
 
 % paper review:
 % 3.1 "Most commercial DBMS involve a light-weight mechanism to pass on CPU control (Shore uses user-level threads)." (trifft bspw. auf MySQL nicht zu)
-The \emph{Synchronized Transactions through Explicit Processor Scheduling} (STEPS) project implements a derivative of cohort scheduling in the research database system SHORE.~\cite{steps,shore}
+The \emph{Synchronized Transactions through Explicit Processor Scheduling} (STEPS) project implements a derivative of cohort scheduling in the research database system SHORE.~\cite{shore}
 
 The authors replicate the observation of \cite{cohort} for database systems: the execution flow exhibits low spatial locality and do not fit into the CPU caches, leading to pipeline stalls and a high amount of mispredicted branches.
 In contrast to cohort scheduling, STEPS groups threads handling a transaction into \emph{team lists} organized by high-level operation (e.g. \texttt{INSERT}, \texttt{UPDATE}, etc).
@@ -197,25 +209,27 @@ In contrast, arbitrary applications will use the pthreads and C standard librari
 \emph{either} substantial modifications to the code base are necessary to establish a situation as found in SHORE
 \emph{or} runtime-patching via \texttt{LD\_PRELOAD} would be required.
 
-Finally, \cite{steps} mentions that STEPS gives a hint to the OS scheduler when a thread blocks in order schedule the next regular team member and maximize the usage of the already warm cache.
+Finally, \citeauthor*{steps} mentions that STEPS gives a hint to the OS scheduler when a thread blocks in order schedule the next regular team member and maximize the usage of the already warm cache.
 The downside of this approach is that substantial \todo{find proof} code paths in the operating system are not covered by STEPS at all
 --- stray threads will continue to compete for CPU time while they are not blocked.
 An OS scheduler unaware of the team lists may thus schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
 
-\section{Memory Hierarchy on Contemporary Server-Class CPUs}
+\relworksection{Memory Hierarchy on Contemporary Server-Class CPUs}{ch:relwork:memhier}
 % All numbers by example: My Haswell against STEPS CPU
 % L1 and L2 are now oncore, L3 is shared (and inclusive on Intel)
 % In contrast: early 2000s processors were single-core, L1 and L2
 % capacities of L2 now what we have in L2 on-core
 % today's L1 is split 32KiB i- and d-cache, early 2000s L1 64KiB (shared / unified?)  
 
-\section{Profiling Datacenter Applications}
+% proof that today's chips are multicore: begin sodaspr
+
+\relworksection{Profiling Datacenter Applications}{ch:relwork:profiling}{kanev2015profiling}
 % alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
 % dominant are the d-cache misses, but i-cache misses are also significantly higher than usual 
 % growth of i-cache working set over time (speculation: due to product development) => worsens situation
 % => stall cycles, X %
 % memory latency, not band width
-While the micro-architectural performance problems caused by large i-cache footprints were already observed by \cite{cohort} and \cite{steps} in the early 2000s,
+While the micro-architectural performance problems caused by large i-cache footprints were already observed in \cite{cohort} and \cite{steps} in the early 2000s,
 recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
 However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation:
 \citeauthor*{kanev2015profiling} identify significantly higher amount of pipeline stalls in real-world datacenter software when compared to the SPEC CPU2006 benchmark.
@@ -224,8 +238,8 @@ a large cache footprint (both code and data) reveals the major performance bottl
 the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
 In particular, the authors find that more than 5\% of cycles starved on empty front-end buffers, which is attributed to i-cache misses in the on-core L2 cache, resulting in slow off-core accesses to the CPU's last level cache.
 Additionally, the instruction working set of applications is shown to grow significantly over their active develpoment time, worsening the situation.%
-\footnote{\cite{kanev2015profiling} shows examplary results of up to 27\% per year}
-The authors do not provide explicit reasons for the abnormal size of the instruction working sets, only mentioning \textquote{lukewarm} code and static linking as possible contributors.~\cite{kanev2015profiling}
+\footnote{The authors present examplary results of up to 27\% per year.}
+The authors do not provide explicit reasons for the abnormal size of the instruction working sets, only mentioning \textquote{lukewarm} code and static linking as possible contributors.
 
 In comparison to the work published a decade earlier (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}),
 \citeauthor*{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
@@ -233,7 +247,7 @@ approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU 
 Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
 Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.
 
-\section{Adoption of staged computation}
+\relworksection{Adoption of staged computation}{ch:relwork:adoption}
 % see related work cohort scheduling
 % NGINX is event-driven, think it counts as such
 % Apache is not event driven, maybe check MLs for analysis of nginx
@@ -243,7 +257,7 @@ Given that at least a portion of these threads will be part of network servers, 
 % stagedExecutionDBMS p6 Maintainability
 Maybe leave this sectin out entirely and just use the next section as justification?
 
-\section{Cohort Scheduling on SMP Systems}
+\relworksection{Cohort Scheduling on SMP Systems}{ch:relwork:cohortsmp}
 Like all of the previous work presented so far, STEPS was evaluated and built on a single-core machine, with adaption to multi-core systems not mentioned at all or staying theoretical.~\cite{steps,harizopoulos2003case}
 This section argues that the concept of cohort scheduling and STEPS fails on multi-processor systems.
 
@@ -257,12 +271,10 @@ But even in this scenario, the OS would time-multiplex each CPU cores, leading t
 \todo{finish this...}
 \todo{affinity scheudling paper? just ignore it?}
 
-\section{Computation Spreading}
+\relworksection{Computation Spreading}{ch:relwork:compspr}{compspr}
 % TODO: related and actually more relevant to our approach: Computation Spreading
 % => term: destructive interference
 % => migration for syscall => split i-working set (naturally) + little communication (because sendfile)
-{\footnotesize This section summarizes \cite{compspr}.} % TODO should become a sub-heading
-
 \emph{Computation spreading} (CSP) in its most general form is a technique to cache the instruction working set of a process more effectively on SMP systems which commonly feature private caches per core.
 \citeauthor*{compspr} show that this cache hierarchy leads to rendundantly stored code.
 For example, in a traditional thread-based concurrency model, each request-handling thread may interact with the file system through system calls which leads to redundantly stored file system code being in each core's private cache.
@@ -278,7 +290,7 @@ The approach leads to a speed-up of up to 20\% in Apache and 9.4\% in OLTP measu
 
 Despite the very specific implementation, the general concept presented by the authors is more general and not limited to the syscall interface, suggesting arbitrary migration points and corresponding core allocation policies.
 
-\section{Protoype in Linux at KIT OS Group}\label{ch:relwork:kitpoc}
+\relworksection{Protoype in Linux at KIT OS Group}{ch:relwork:kitpoc}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
 A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort
 scheduling and computation spreading into a C API that allows for intuitive conversion of existing code bases to
