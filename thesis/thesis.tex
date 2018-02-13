@@ -119,19 +119,45 @@ We conclude with a proof-of-concept implementation at the KIT OS group which ext
     }%
 }%
 
-\relworksection{Concurrency Models in the Early 2000s}{ch:relwork:conmod}
+\relworksection{Network Servers \& Concurrency}{ch:relwork:concmod}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
 % better terminology can be foun din the SEDA paper
 % see flash web server
 % establish terminology like per-request threading, thread pool?
 % flash web terminology => ours
 % multi process / multi threaded = thread per request / thread pool
-\blindtext
+Network server software is generally concerned with receiving requests from clients over a network connection, acting upon them and returning a response.
+In addition to the network I/O, disk access is very common, for example within file servers.
+The request handlers are thus commonly I/O bound.\todo{proof}
+
+I/O \emph{hardware} interfaces are asynchronous, allowing the CPU to perform useful work while the slow I/O operation completes.
+However, the traditional \emph{software} abstractions exposed by the operating system are synchronous:
+processes or threads that \emph{block} on I/O operations are preempted from the CPU and only resume execution once the result of the operation is available.
+\citeauthor*{flashwebsrv} identify two architectures that are derived directly from this situation:
+in \emph{multi-process} and \emph{multi-threaded} server architectures, request handling is encoded in a single sequential control flow with blocking I/O operations inbetween.
+Concurrency is then achieved by having multiple threads (either spawned on demand or from a pre-spawned pool) execute the same request-handling function for different connections and to interleave these control flows by time-multiplexing the CPU.
+Since the activity is I/O bound, this interleaving happens most often when an I/O operation blocks or at the end of the scheduler-assigned time slice.
+Canonical scalability problems with this approach are the context switching overhead and the minimal amount of memory each thread requires, e.g. for its TCB and stack.
+Furthermore, synchronizing request handlers on shared resources without busy waiting requires kernel supported synchronization primitives, implying syscall overhead.~\cite{flashwebsrv,c10k,andersonThreads,seda}
+
+Asynchronous I/O interfaces are the obvious alternative:
+applications initiate an operation and use polling or mechanisms such as \texttt{select} to check for completion as necessary.
+Numerous mechanisms for communicating completion \emph{events} to the application have been explored and are best summarized in \cite{c10k} and \cite{seda}.
+A common pattern built ontop these primitives is the \emph{event loop} or \emph{event-driven architecture}:
+request processing state is not implicitly encoded in a sequential code path and the thread's state but instead explicitly defined as data.
+The server consists of a loop that allocates a state object per request and a finite state machine driven by those objects.
+Each thread of the server acts on one state object at a time, but does not perform blocking operations.
+Instead, the operations are handed off to the kernel and the state machine switches to the next state object.
+When an asynchronous I/O operation completes, the server loop picks up this event and changes the corresponding state object, which eventually triggers the state machine to perform the next logical request-handling step.~\cite{flashwebsrv,seda}
+
+The difference becomes even clearer when assessing the use of multiple CPU cores:
+\emph{multi-process} and \emph{multi-thread} delegate the task of load balancing between the cores to the OS scheduler, which faces the trade-off between cache-affinity and work-conservation.
+The \emph{event-driven} approach in contrast needs only one thread per physical core, because the event loop never blocks except if no events occur, waiting for event delivery.
+Since events are not bound to a thread but to the process, each event loop on any core can take over processing of new events for any state object, which results in automatic load balancing.\todo{proof}
 
 \relworksection{Cohort Scheduling \& Staged Computation}{ch:relwork:cohort}{cohort}
-We start our investigation of staged execution with \emph{cohort scheduling}, dating back to the early 2000s:
-the authors measure the cache behavior of I/O intensive online-transaction processing (OLTP) workloads in servers implementing the multi-process / multi-threaded request handling model.
-They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
+In the early 2000s, \citeauthor*{cohort} investigated the cache behavior of I/O intensive online-transaction processing workloads (OLTP) in servers following the multi-process or multi-threaded architecture.
+They observe\todo{time? should prev sentence be present?} high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
 system calls themselves have a large working set disjoint from the application code and may bring an entirely different working set into the cache when blocking and switching to another thread.
 
 \emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads currently sharing a working set in batches (\emph{cohorts}):
