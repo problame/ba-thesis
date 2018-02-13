@@ -31,7 +31,7 @@
 \selectlanguage{american}
 
 \title{Stage-aware Scheduling in a Library~OS}
-\author{cnad. inform. Christian Schwarz}
+\author{cand. inform. Christian Schwarz}
 \thesistype{Bachelor Thesis}
 \primaryreviewer{Prof.\ Dr.\ Frank Bellosa}
 \advisor{M.\ Sc.\ Mathias Gottschlag}{}
@@ -51,49 +51,54 @@
 \tableofcontents
 
 \chapter{Introduction}
-Network servers account for a significant percentage of contemporary application software and play a central role in today's public and corporate infrastructure.
-This class of application software is primarily concerned with handling of concurrent requests.
-A common design pattern is to implement a \emph{sequential} handler routine to process each request, consisting of logical stages such as protocol handling, decoding/encoding, actual business logic, etc.
+Network servers are of every-increasing importance in todays cloud-based distributed infrastructure, handling requests from clients at high degrees of concurrency.
+A common implementation pattern is a \emph{sequential} handler routine that processes each request, consisting of logical stages such as protocol handling, decoding/encoding and actual business logic.
 Concurrency is achieved by executing the handler code per connection in separate operating system thread -- either by spawning a thread per request or by using a thread pool.
-The sequential handler implementation is simple to follow for programmers and abstractions for the aforementioned threading models are available in virtually any programming language and operating system.\todo{ref}
+The sequential handler implementation is simple to follow for programmers and abstractions for the aforementioned threading models are available in virtually any programming language and operating system.~\cite{flashwebsrv,c10k}
 
+Given the inceasing cpu-memory-performance gap, it is paramount that the request handler's working set fits into the private CPU caches.
+The instruction working set if of particular importance to feed the execution pipeline of contemporary superscaler out-of-order processors.
 The dominant CPUs in the server market are \texttt{x86\_64} based Intel processors targeted at the mass market.
 The memory hierarchy of processors since the Haswell microarchitecture features separate 32KiB L1-d and L1-i caches and a unified 256KiB L2 cache per core, as well as a shared inclusive L3 cache that is significantly larger.\todo{ref}
+Howver, recent large-scale profiling at Google suggests that this memory hierarchy fails to meet the demands of contemporary server applications:
+request handling code exhibits little spacial locality and thrashes the private CPU caches, leading to suboptimal branch prediction and pipeline stalls.\cite{kanev2015profiling}
 %Hardware-supported operating system virtualization using KVM or Xen is commonly used to isolate applications both for simplified administration and increased security.
 %Linux is the dominant guest operating system offering a familiar environment and high-performance paravirtualization drivers.
-Recent large-scale profiling at Google suggests that the memory hierarchy of these commodity processors is suboptimal for the server applications they run:
-the request-handlers' instruction working-set does not fit into the on-core caches, ultimately leading to pipeline stalls while the processor waits for slower L3 accesses.\cite{kanev2015profiling}
 
 Previous work in this field includes techniques such as \emph{cohort scheduling}:
 threads in the same working set are grouped into \emph{cohorts} and dispatched in series to reap the benefits of warm instruction caches.
-If the shared working set fits into the on-core caches, instruction-dependent pipeline stalls are greatly reduced.
-\emph{Staged Computation} brings this concept to general software architecture and \emph{staged event-driven architectures} (SEDA) generalize it further:
+If the shared working set fits into the cache for one series, instruction-dependent pipeline stalls are greatly reduced.
+\emph{Staged Computation} expands this concept to general software architecture and \emph{staged event-driven architectures} (SEDA) generalizes it further:
 request processing state is encapsulated into an object which is passed through a pipeline of stages interconnected by queues.
 Each stage controls the concurrency model used to perform its work, allowing cohort scheduling to be employed.
 A derivative of cohort scheduling has been implemented in a research DBMS under them term \emph{STEPS}, yielding an overall speedup of $1.4$ in the TPC-C benchmark.\cite{cohort,seda,steps,harizopoulos2005staged}
 
-Despite promising results of above research, it has found little adoption in popular database management systems such as MySQL, which uses thread-basaed concurrency (one handler per request) with a pre-spawned pool of handler threads.\cite{mysqlThreading}.
-% TODO relevance of research for cohort on SMP 
-% TODO next line maybe leave it out
-By analyzing project development discussions, we show that the complex refactoring needed to adopt staged computation has been limiting its adoption in legacy applications TODO such as.
-We present experimental work at the KIT OS group showing an approach to staged computation that requires minimal customization of existing applications:
-the application develper manually defines stages and inserts one-line stage switching calls into the request handling code.
-By dedicating CPU cores to stages and migrating threads between the cores on stage switch, a prototype implementation in Linux reduces instruction cache misses by X\% \todo{data}.
-However, experiments show that the prototype is not work-conserving on multi-processor systems.\todo{ref}
+Despite promising results of above research, it has found little adoption in popular database management systems such as MySQL, which uses thread-basaed concurrency (one handler per request) with a pre-spawned pool of handler threads.~\cite{mysqlThreading}.
+Furthermore, we find several assumptions in the designs of above solutions that no longer hold on today's SMP systems.
+Therefore, we explore techniques that explicitly target multi-processor systems.
+\emph{computation spreading} is a technique that splits the working set of thread at the user-kernel-boundary by executing OS code on different cores than user-level code, thus making use of the private caches more effectively.
+Experimental work at the KIT OS group combines computation spreading with the idea of staged computation, resulting in a solution where
+application developers manually partition their code into stages and inserts one-line stage switching calls into the request handling code path.
+By dedicating CPU cores to stages and migrating threads between the cores on stage switch, the request handler's instruction working set is spread over the private caches of these cores.
+A proof-of-concept implementation in Linux and the MySQL database management system show that i-cache misses and branch-misprediction rates can be reduced by X and Y\% respectively while keeping the modifications in MySQL to a total of just Z lines of C++.
+However, experiments with multiple concurrent requests show that the prototype is not work-conserving on multi-processor systems.
 
-This thesis shows that proper OS abstractions enable adoption of staged computation in legacy applications with minimal customization effort:
+This thesis shows that proper OS abstractions enable staged computation on modern SMP systems while requiring minimal customization effort in legacy applications.
+Specifically, our contributions are as follows:
 \begin{itemize}
-    \item We analyze the design and implementation of the Linux proof-of-concept and point out why it is not work-conserving.
+    \item We analyze the design aspects that make the early 2000's approaches of cohort scheduling and STEPS inapplicable to SMP systems.
+    \item We analyze the design and implementation of the aforementioned proof-of-concept implementation at the KIT OS group and point out why it is not work-conserving.
     \item We present OS abstractions and a user-space C++ API for applications to manually define stages and stage switching points in the request-handling code path.
     \item We present the design and implementation of a work-conserving scheduling policy that allocates CPUs to stages and migrates threads as necessary to preserve warm instruction-caches.
     \item We show that appropriate stage partitioning and switching points lead to a reduced cache miss rate of X\% in synthetic benchmarks and throughput gains of X\% in a stage-aware version of MySQL under the TPC-C benchmark.\todo{measurement}
 \end{itemize}
 
-The remainder of this thesis is structured as follows:
-In Chapter~\ref{ch:relwork}, we examine preceding work in the area of staged computation.
+The remainder of this thesis is structured accordingly.
+In Chapter~\ref{ch:relwork}, we examine preceding work in the area of staged computation, including an analysis of their applicability to multi-processor systems.
 Chapter~\ref{ch:analysis} dissects the KIT OS group's proof-of-concept implementation and points out why the design is not work conserving.
 Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our solution in the OSv library operating system.
 Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both synthethic microbenchmarks and the TPC-C benchmark against a stage-aware version of MySQL to show the intended cache behavior and performance improvements.
+
 
 \chapter{Related Work}\label{ch:relwork}
 High-performance network servers must handle requests at a degree of concurrency that exceeds the real parallelism provided by hardware in the form of CPU cores.
