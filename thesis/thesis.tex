@@ -107,7 +107,7 @@ we investigate the stagnant adoption of above techniques in today's production s
 
 A solution to use the memory hierarchy on SMP systems more effectively has already been published under the name \emph{computation spreading}:
 this approach executes OS code on different CPU cores than user-level code by migrating threads on synchronous kernel entry, effectively spreading the instruction working set of OS-intensive applications.
-We conclude with a proof-of-concept implementation at the KIT OS group which implements computation spreading to arbitrary separation points in the application code.
+We conclude with the starting point for this thesis: a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code.
 
 \NewDocumentCommand{\relworksection}{m m g}{
     \section{#1}\label{#2}
