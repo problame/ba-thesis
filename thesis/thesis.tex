@@ -102,19 +102,22 @@ This chapter starts with an overview of the prevalent concurrency models in the 
 We proceed with an introduction to \emph{cohort scheduling} and \emph{staged computation} which stem from the same time period
 and present an application of these proposals to a research database management system, resulting in significant performance improvements due to reduced i-cache misses and better branch prediction.
 
-Motivated by recent profiling work at Google datacenters which proves that scale-out applications' large instruction cache footprint is still cause for major performance bottlenecks on contemporary CPUs,
-we investigate the stagnant adoption of above techniques in today's production software systems and find assumptions made in the early 2000s' designs that no longer hold on today's SMP systems and memory hierarchies.
+In an interim section, we analyze the applicability of the above ideas to contemporary multi-processor systems and memory hierarchies, coming to the conclusion that major redesigns are required to make them work-conserving.\todo{... for \$noun}
 
-A solution to use the memory hierarchy on SMP systems more effectively has already been published under the name \emph{computation spreading}:
-this approach executes OS code on different CPU cores than user-level code by migrating threads on synchronous kernel entry, effectively spreading the instruction working set of OS-intensive applications.
-We conclude with the starting point for this thesis: a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code.
+Recent profiling work at Google shows that typical datacenter applications' large instruction working set is still cause for major performance bottlenecks on contemporary CPUs.
+We present exsiting work published under the name \emph{computation spreading} that explicitly targets SMP systems and shows how to use their memory hierarchy more effectively.
+We conclude with a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code.
 
-\NewDocumentCommand{\relworksection}{m m g}{
-    \section{#1}\label{#2}
-    \IfValueT{#3}{%
-        \sectionsubheading{This section summarizes \cite{#3} by \citeauthor*{#3}.}
+\NewDocumentCommand{\relworksection}{s m m g}{%
+    \section{#2}\label{#3}%
+    \IfValueT{#4}{%
+        \IfBooleanTF{#1}{%
+            \sectionsubheading{#4}%
+        }{%
+            \sectionsubheading{This section summarizes \cite{#4} by \citeauthor*{#4}.}%
+        }%
     }%
-}
+}%
 
 \relworksection{Concurrency Models in the Early 2000s}{ch:relwork:conmod}
 % analysis of different htreading models with temrinology used in cohort scheduling: anderson paper
@@ -215,14 +218,45 @@ The downside of this approach is that substantial \todo{find proof} code paths i
 --- stray threads will continue to compete for CPU time while they are not blocked.
 An OS scheduler unaware of the team lists may thus schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
 
-\relworksection{Memory Hierarchy on Contemporary Server-Class CPUs}{ch:relwork:memhier}
+\relworksection{Interim: Applicability to SMP Systems}{ch:relwork:cohortsmp}
+The related work we presented so far was evaluated on a single-core machine, with adaption to multi-core systems not mentioned at all or staying theoretical.~\cite{steps,harizopoulos2003case}\\
+However, we argue that the designs of cohort scheduling and STEPS must be re-examined given the ubiquity of multi-processor systems.
+
+\subsection{Private Caches}
 % All numbers by example: My Haswell against STEPS CPU
 % L1 and L2 are now oncore, L3 is shared (and inclusive on Intel)
 % In contrast: early 2000s processors were single-core, L1 and L2
 % capacities of L2 now what we have in L2 on-core
 % today's L1 is split 32KiB i- and d-cache, early 2000s L1 64KiB (shared / unified?)  
-
 % proof that today's chips are multicore: begin sodaspr
+The single-core machines used in the evaluations have a small L1 cache and a larger, higher-latency L2 cache.
+However, contemporary symmetric multi-processors feature \emph{private} L1 and L2 caches and a \emph{shared} L3 cache.
+Access latency to the L3 cache is orders of magnitude higher than to the private caches. \todo{proof}
+
+Due to this discrepancy, an adaption of cohort scheduling and STEPS to multiprocessors must target the private caches in order to achieve similar speedups.
+More importantly, the existence of private caches per hardware thread introduces the problem and opportunity to allocate this resource:
+in terms of STEPS, multiple steps can now be spread over different cores instead of time-multiplexing the single available L1 i-cache.
+We come back to this observation when assessing \emph{computation spreading} in Section~\ref{ch:relwork:compspr}.
+
+\subsection{Real Parallelism}
+We recall from Section~\ref{ch:relwork:cohort} that the scheduling tradeoff in both approaches consists of reduced cache misses vs. increased response time due to \emph{batching}.
+However, the real parallelism available on SMP systems brings with it another scheduling dimension that STEPS and cohort scheduling do not address:
+to utilize the available hardware threads, load must be balanced among them to maximize resource utilization.
+This goal surpasses response time since as the primary scheduling goal since the the service provider generally pays for the number of cores, not their actual usage.\todo{well actually... cpu time accounting}
+All relevant operating systems abstract CPU cores through threads, and the OS scheduler implements load balancing by migrating threads between cores, often directed by metrics such as the length of each core's the ready queue (\emph{load}). \todo{proof}
+
+Cohort scheduling and STEPS were not designed for this situation because
+%both solutions include \emph{batching} as a central element, either at the syscall boundary or at arbitrary points in the application code (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}).
+\textbf{batching is inherently not work-conserving on SMP systems}:
+it is the core idea of these approaches that only one thread in a cohort or team can run at any given time in order to keep the i-cache filled with the current step's code.
+Furthermore, STEPS and the OS scheduler work actively against each other because the latter will see all threads in a cohort as runnable and actively spread the cohort over all (presumably idle) cores,
+destroying all promised performance benefits.
+
+An easy fix would be a mechanism for STEPS to influence the load balancing in order to favor threads of the same team to stay on the same core, e.g. through thread pinning.
+This is obviously not work-conserving on multi-core systems, requiring additional mechanisms and communication between STEPS and the OS to fix it.
+
+We observe that a pure user-space approach is inapplicable on contemporary operating systems, acknowledging the foresight of the SEDA publication that proposes OS support.
+\todo{affinity scheudling --- just ignore it?}
 
 \relworksection{Profiling Datacenter Applications}{ch:relwork:profiling}{kanev2015profiling}
 % alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
@@ -232,7 +266,8 @@ An OS scheduler unaware of the team lists may thus schedule a stray threads in t
 % memory latency, not band width
 While the micro-architectural performance problems caused by large i-cache footprints were already observed in \cite{cohort} and \cite{steps} in the early 2000s,
 recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
-However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation:
+However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation.
+
 \citeauthor*{kanev2015profiling} identify significantly higher amount of pipeline stalls in real-world datacenter software when compared to the SPEC CPU2006 benchmark.
 Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
 a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
@@ -248,30 +283,6 @@ approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU 
 Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
 Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.
 
-\relworksection{Adoption of staged computation}{ch:relwork:adoption}
-% see related work cohort scheduling
-% NGINX is event-driven, think it counts as such
-% Apache is not event driven, maybe check MLs for analysis of nginx
-% MySQL definitely not, maybe search ML posts for SEDA papers, also check Postgres
-% paper 'duality of operating system structures', das sagt, dass message passing (also im prinzip staged computation) und mulit-threading im prinzip ds selbe ist
-% => beweis, dass stages message passing sind: stagedExecutionDBMS, 4.1 rechts unten: individual servers
-% stagedExecutionDBMS p6 Maintainability
-Maybe leave this sectin out entirely and just use the next section as justification?
-
-\relworksection{Cohort Scheduling on SMP Systems}{ch:relwork:cohortsmp}
-Like all of the previous work presented so far, STEPS was evaluated and built on a single-core machine, with adaption to multi-core systems not mentioned at all or staying theoretical.~\cite{steps,harizopoulos2003case}
-This section argues that the concept of cohort scheduling and STEPS fails on multi-processor systems.
-
-As discussed in Section~\ref{ch:relwork:cohort}, the scheduling tradeoff in cohort scheduling consists of reduced cache misses vs. increased response time due to batching.
-On single core systems, cohort scheduling and STEPS time-multiplexe the \emph{single} L1 i-cache more efficiently than traditional OS schedulers, leading to performance benefits.
-However, contemporary multi-core machines provide private caches \emph{per core} and allow for real parallelism of threads.
-The OS scheduler is usually tasked with load-balancing between these cores for maximum resource utilization.
-However, load balancing requires thread migration, which generally implies that the migrated thread will incur cache misses on the target CPU.
-STEPS would need to influence the load balancer in order to favor threads of the same team to stay on the same core but expand to another core onoce the break-even point between \textit{speedup by warm cache} and \textit{speedup by real parallelism} is hit.
-But even in this scenario, the OS would time-multiplex each CPU cores, leading to cache-misses between different teams.
-\todo{finish this...}
-\todo{affinity scheudling paper? just ignore it?}
-
 \relworksection{Computation Spreading}{ch:relwork:compspr}{compspr}
 % TODO: related and actually more relevant to our approach: Computation Spreading
 % => term: destructive interference
@@ -281,6 +292,7 @@ But even in this scenario, the OS would time-multiplex each CPU cores, leading t
 For example, in a traditional thread-based concurrency model, each request-handling thread may interact with the file system through system calls which leads to redundantly stored file system code being in each core's private cache.
 The authors present a solution that temporarily assigns CPU cores to either execute OS code or user-level code, exploring and evaluating several allocation policies.
 Threads entering or leaving the OS synchronously through syscalls, exceptions or page faults are then migrated between compatible cores.
+
 The implementation is based on hardware virtualization allowing for interception of above kernel entries without modifying the (guest) OS or user-space as well as a hardware-provided thread migration mechanism.
 Naturally, this concept requires control or at least cooperation of the software executing in hypervisor mode.
 
