@@ -105,13 +105,12 @@ High-performance network servers must handle requests at a degree of concurrency
 Much research has gone into techniques to handle this problem, further constrained by additional requirements such as predictable response times and fairness among clients.
 This chapter starts with an overview of the prevalent concurrency models in the early 2000s' software landscape.
 We proceed with an introduction to \emph{cohort scheduling} and \emph{staged computation} which stem from the same time period
-and present an application of these proposals to a research database management system, resulting in significant performance improvements due to reduced i-cache misses and better branch prediction.
-
-In an interim section, we analyze the applicability of the above ideas to contemporary multi-processor systems and memory hierarchies, coming to the conclusion that major redesigns are required to make them work-conserving.\todo{... for \$noun}
-
-Recent profiling work at Google shows that typical datacenter applications' large instruction working set is still cause for major performance bottlenecks on contemporary CPUs.
-We present existing work published under the name \emph{computation spreading} that explicitly targets SMP systems and shows how to use their memory hierarchy more effectively.
-We conclude with a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code.
+and summarize \emph{STEPS}, which applies above proposals to a research database management system, showing that significant performance improvements due to reduced i-cache misses and better branch prediction are possible.
+However, these systems were evaluated on single-core machines in the early 2000s.
+In an interim section, we take a step back and analyze the applicability of these ideas to contemporary multi-processor systems and memory hierarchies, coming to the conclusion that major redesigns are required in order to provide work-conserving solutions.
+Large-scale profiling at Google from 2015 shows that the problems observed more than a decade before are still prevalent in today's datacenters applications.
+Motivated by the ongoing relevance of the topic and a changed hardware landscape we explore \emph{computation spreading}, a technique that explicitly targets SMP systems showing that thread migration can help use their memory hierarchy more effectively.
+We conclude this chapter with a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code, forming the basis for this thesis.
 
 \NewDocumentCommand{\relworksection}{s m m g}{%
     \section{#2}\label{#3}%
