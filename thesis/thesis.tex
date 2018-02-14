@@ -333,70 +333,74 @@ The approach leads to a speed-up of up to 20\% in Apache and 9.4\% in OLTP measu
 
 Despite the very specific implementation, the general concept presented by the authors is more general and not limited to the syscall interface, suggesting arbitrary migration points and corresponding core allocation policies.
 
+\todo{hardware-based approaches?} % http://ieeexplore.ieee.org/document/1410076/
+
 \relworksection{Prototype in Linux at KIT OS Group}{ch:relwork:kitpoc}
 %TODO this section should coin the term stage-aware scheduling, otherwise, we need to do that before the analysis --- rename section with stage-aware in title
-A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort
-scheduling and computation spreading into a C API that allows for intuitive conversion of existing code bases to
-staged execution:
-The developer manually identifies stages and inserts library calls into application code for switching the current stage.
-Each CPU core is assigned one or more stages and each time a thread switches to a new stage, it is migrated to a core
-assigned to that stage.
+A Linux-based proof of concept implementation at the KIT OS group combines the idea of staged execution, cohort scheduling and computation spreading into a C API that allows for intuitive conversion of existing code bases to staged execution:
+the application developer manually identifies stages and inserts library calls into application code for switching the current stage.
+Each CPU core is assigned one or more stages and each time a thread switches to a new stage, it is migrated to a core assigned to that stage, benefiting from a warm i-cache.
+Obviously, this approach targets applications that employ thread-based concurrency, i.e. the multi-threaded server architecture outline in Section~\ref{ch:relwork:concmod}, since the stage-switching is embedded into the control flow of the request handler and thus not explicitly modeled like in SEDA (see Section~\ref{ch:relwork:seda}).
 
-It is obvious that a fast thread migration mechanism is required for this technique to succeed
+Fast thread migration mechanism is required for this technique to succeed
 --- otherwise, the performance benefits of always-warm caches per stage are destroyed by the migration time.
 %\newcommand{\setaffinity}{\texttt{sched\_setaffinity(2)}}
 The Linux built-in facility for this purpose, \texttt{sched\_setaffinity}, is impractical because it uses
-expensive inter-processor-interrupts to implement this syscall, resulting in $9\mu s$ -- $14\mu s$ of migration time.~\cite{sodaspr}% TODO check on IPs 
+expensive inter-processor-interrupts to implement this syscall, resulting in $9\mu s$ -- $14\mu s$ of migration time.
 As a consequence, thread migration was implemented in user-space:
 for each user-level thread (ULT), there still exists exists a kernel-level thread (KLT),
 but KLTs are pinned once to a specific core and stage.
-ULTs run on a KLT of the stage they are currently in and migrate to a different KLT when switching stages.
-TODO threading model required
-TODO automatic -> mathias' paper, when it's published
+ULTs run on a KLT of the stage they are currently in and migrate to a different KLT when switching stages.~\cite{sodaspr}% sodaspr:table 1
 
 When a ULT makes a call to switch stages, its context is saved and enqueued into the next stage's ready queue.
 The originating KLT now waits for new ULTs on its own stage's incoming migrations queue.
-If it is empty, the KLT makes a blocking syscall \texttt{TODO\_dequeue\_syscall} to a kernel component to wait for incoming migrations.
+If it is empty, the KLT makes a blocking syscall \texttt{sys\_dequeue} to a kernel component to wait for incoming migrations.
 The kernel component must ensure that there is always one KLT per core either doing work or actively dequeuing ULTs in order to utilize the CPU.
 This is implemented by a callback from the Linux scheduler that informs the kernel component of task state changes.
 For example, if the currently dequeuing KLT $K_1$ executes a ULT, and that ULT blocks on a mutex, $K_1$ switches to \texttt{TASK\_INTERRUPTIBLE}.
 The kernel component must wake up another KLT $K_2$ that is currently waiting for incoming migrations of that stage on that core.
 Otherwise, the core does not perform any work (for the application) until $K_1$ acquires the mutex and switches back to \texttt{TASK\_RUNNING}
 
-TODO results with single threaded execution, show that it works, reduced cache misses and performance gains are visible.
-
-However, multi-threaded workloads on an SMP system exhibit visible CPU under-utilization.
-Imagine a system with $\frac{\#cores}{stage} > 1$ and a ULT $U_1$ in stage $S$ executing on a KLT $K_1$.
-As described above, $K_1$ is pinned to core $C_1$.
-When $U_1$ performs a blocking syscall, for example waiting to acquire a mutex via \texttt{pthread\_mutex\_lock}, $K_1$ blocks and becomes \texttt{TASK\_INTERRUPTIBLE}.
-The Linux scheduler now dispatches another task $T$ on $C_1$ to maximize CPU utilization.
-(Note that $T$ is not a $K_i$ of our application. In fact, all $K_i$ are blocked in \texttt{TODO\_dequeue\_syscall}.)
-When $K_1$ finally acquires the mutex and is \texttt{TASK\_RUNNING} again, it can still only be dispatched to $C_1$ due to pinning which is necessary for user-level thread migration.
-However, $C_1$ will be executing $T$, not $K_1$ which is put into $C_1$'s ready queue instead.
-The misery at this point is that there may exist \textbf{another} CPU $C_2$ where a KLT $K_2$ is dequeuing ULTs in the \textbf{same stage} $S$:
-if $K_2$ does not have any ULTs to execute, $K_1$ should be migrated to $C_2$ immediately when it is woken up and continue execution there, benefiting from the warm on-core caches.
-But the implementation only performs thread migration when a ULT calls the stage switching API.
-There is no mechanism in place to save $K_1$'s state and enqueue it to $K_2$'s incoming migration queue on wake-up.
-(One might assume it is possible to enqueue $U_1$ to $K_2$ since we saved its register state on kernel entry via \texttt{pthread\_mutex\_lock}:
-this is not possible because there might still be kernel code that needs to run after the mutex is acquired, before returning to $U_1$.)
-
-TODO UML sequence diagram visualizing the pathological case described above.
+The authors evaluate their design with microbenchmarks and performance-counters, showing x\% fewer i-cache misses, y\% fewer mispredicted branches.
+Additionally, a full-system evaluation is made by comparing the benchmark results of the TPC-C OLTP benchmark on Linux 4.X between an upstream and a \emph{stagified} version of MySQL 5.6.38 running on an SMP system with X cores.
+The expected reductions of i-cache and mispredicted branches are achieved in the stagified version, but overall throughput depends on the number of concurrent requests.
+taking upstream as baseline (100\%), throughput with a single TPC-C terminal is z\% higher in the stagified version, but multiple terminals and thus concurrent requests leads to Z2\% of upstream's throughput.
+The proof-of-concept is thus clearly not work-conserving on SMP systems, which we will investigate in the next chapter.
+\todo{data}
 
 \chapter{Analysis}\label{ch:analysis}
 Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
 The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
-given an application with a suitable threading model, patches of a few lines are sufficient to reduce the cache-miss rate by TODO.
+given an application with a suitable threading model, patches of a few lines are sufficient to reduce i-cache misses and branch-misprediction significantly.
 
-Nonetheless, we identify several fundamental problems in the approach taken by the proof-of-concept implementation:
+However, its evaluation on an SMP system shows that the solution is not work-conserving due to the following reason:
+imagine a system with ${\frac{\#cores}{stage} > 1}$ and a ULT $U_1$ in stage $S$ executing on a KLT $K_1$.
+As described above, $K_1$ is pinned to core $C_1$.
+When $U_1$ performs a blocking syscall, for example waiting to acquire a mutex via \texttt{pthread\_mutex\_lock}, $K_1$ blocks and becomes \texttt{TASK\_INTERRUPTIBLE}.
+The Linux scheduler now dispatches another task $T$ on $C_1$ to maximize CPU utilization.
+(Note that $T$ is not a $K_i$ of our application. In fact, all $K_i$ are blocked in \texttt{sys\_dequeue}.)
+When $K_1$ finally acquires the mutex and is \texttt{TASK\_RUNNING} again, it is still pinned to $C_1$ because the solution needs this to perform thread migration in user-space.
+However, $C_1$ is still executing $T$, not $K_1$, and thus $K_1$ must be put into $C_1$'s ready queue.
+
+The misery at this point is that there may exist \emph{another} CPU $C_2$ where a KLT $K_2$ is dequeuing ULTs in the \emph{same stage} $S$:
+if $K_2$ does not have any ULTs to execute, $K_1$ should be migrated to $C_2$ immediately when it is woken up and continue execution there, benefiting from the warm on-core caches.
+But the implementation only performs thread migration when a ULT calls the stage switching API.
+There is no mechanism in place to save $K_1$'s state and enqueue it to $K_2$'s incoming migration queue on wake-up.
+One might assume it is possible to enqueue $U_1$ to $K_2$ since we saved its register state on kernel entry via \texttt{pthread\_mutex\_lock}:
+this is not possible because there might still be kernel code that needs to run after the mutex is acquired, before returning to $U_1$.
+
+UML sequence diagram visualizing the pathological case described above.\todo{draw}
+
+We identify several fundamental problems in the approach taken by the proof-of-concept implementation:
 the requirement for fast thread migration drove the design toward a user-space solution which decouples the threads known by the application (ULTs) from the threads known by the kernel (KLTs).
-However, the kernel scheduler still only handles KLTs and assumes a 1:1 threading model, which leads to an ambiguous role of KLTs in the proof-of-concept:
+However, the kernel scheduler still only handles KLTs and assumes a 1:1 threading model, which leads to an \textbf{ambiguous role of KLTs} in the proof-of-concept:
 when switching between stages, the user space thread migration code views KLTs as the CPUs they are pinned to.
 But when a ULT running on a KLT interacts with the Linux kernel, the kernel sees a normal \texttt{task\_struct} and continues to assume the 1:1 threading model where tasks can just block.
 The proof-of-concept works around this schizophreny by introducing a callback from the scheduler to react to blocking KLTs, but fails to handle asynchronous events like wake-ups.
-The latter leads to the observed pathological behavior on multi-core systems.
+The latter leads to non-work-conserving behavior on multi-core systems.
 
-We conclude that the proof-of-concept does not model the situation correctly: the association of stages and CPU cores is piggybacked onto the KLTs using \texttt{sched\_setaffinity}.
-Instead, we propose that stages must be modeled explicitly in the kernel and be separate entities, beneath CPUs and threads:
+We conclude that the proof-of-concept does not model the situation correctly: the association of stages and CPU cores is piggybacked onto the KLTs using \texttt{sched\_setaffinity}, leading to an ambigous role of KLTs.
+We thus propose that stages must be modeled explicitly in the kernel and be separate entities, beneath CPUs and threads:
 \begin{itemize}%
     \item The association of stages and CPU cores must be represented explicitly.
     \item Threads must carry the information in which stage they are executing.
@@ -405,10 +409,10 @@ Instead, we propose that stages must be modeled explicitly in the kernel and be 
 \end{itemize}%
 This reverts the complex situation of ULTs and KLTs to a simple 1:1 threading model, removing the special-case of blocking kernel activity.
 
-The remainder of this thesis presents our design as well as its implementation in the OSv library operating system and its evaluation using several microbenchmarks and the TPC-C benchmark against the MySQL database management system.
+The remainder of this thesis presents our design as well as its implementation in the OSv library operating system and the evaluation using microbenchmarks and the TPC-C benchmark with MySQL.\todo{repetitive?}
 
 \chapter{Design \& Implementation}
-In this chapter, we present the design and implementation of our solution to the proposal in Chapter~\ref{ch:analysis}.
+In this chapter, we present the design and implementation of our solution following the design proposal at the end of Chapter~\ref{ch:analysis}.
 Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
 related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
 and demonstrated lower cache miss rates in the MySQL database server, which follows the thread-per-request model with a pool of pre-spawned threads.
