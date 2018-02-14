@@ -134,32 +134,30 @@ We conclude this chapter with a proof-of-concept implementation at the KIT OS gr
 % multi process / multi threaded = thread per request / thread pool
 Network server software is generally concerned with receiving requests from clients over a network connection, acting upon them and returning a response.
 In addition to the network I/O, disk access is very common, for example within file servers.
-The request handlers are thus commonly I/O bound.\todo{proof}
+The request handlers are thus commonly I/O bound.~\cite{seda}
 
 I/O \emph{hardware} interfaces are asynchronous, allowing the CPU to perform useful work while the slow I/O operation completes.
 However, the traditional \emph{software} abstractions exposed by the operating system are synchronous:
 processes or threads that \emph{block} on I/O operations are preempted from the CPU and only resume execution once the result of the operation is available.
-\citeauthor*{flashwebsrv} identify two architectures that are derived directly from this situation:
-in \emph{multi-process} and \emph{multi-threaded} server architectures, request handling is encoded in a single sequential control flow containing blocking I/O operations.
+Out of this situation, the following type of software architecture emerged:
+\emph{multi-process} and \emph{multi-threaded} servers handle requests by following a sequential description of the steps involved to fulfill the requested task.
 Concurrency is then achieved by having multiple threads (either spawned on demand or from a pre-spawned pool) execute the same request-handling function for different connections and to interleave these control flows by time-multiplexing the CPU.
-Since the activity is I/O bound, this interleaving happens most often when an I/O operation blocks or at the end of the scheduler-assigned time slice.
+This interleaving happens each time an I/O activity blocks or at the end of the scheduler-assigned time slice.
 Canonical scalability problems with this approach are the context switching overhead and the minimal amount of memory each thread requires, e.g. for its TCB and stack.
-Furthermore, synchronizing request handlers on shared resources without busy waiting requires kernel supported synchronization primitives, implying syscall overhead.~\cite{flashwebsrv,c10k,andersonThreads,seda}
+Furthermore, synchronizing request handlers on shared resources without busy waiting requires kernel-supported synchronization primitives, implying syscall overhead.~\cite{flashwebsrv,c10k,andersonThreads,seda}
 
-Asynchronous I/O interfaces are the obvious alternative:
-applications initiate an operation and use polling or mechanisms such as \texttt{select} to check for completion as necessary.
-Numerous mechanisms for communicating completion \emph{events} to the application have been explored and are best summarized in \cite{c10k} and \cite{seda}.
-A common pattern built ontop of these primitives is the \emph{event loop} or \emph{event-driven architecture}:
-request processing state is not implicitly encoded in a sequential code path and the thread's state but instead explicitly defined as data.
-The server consists of a loop that allocates a state object per request and a finite state machine driven by those objects.
+One alternative to the above are \emph{event-driven architectures} where the server consists of a loop that allocates a state object per request and implements a finite state machine driven by those objects.
 Each thread of the server acts on one state object at a time, but does not perform blocking operations.
-Instead, the operations are handed off to the kernel and the state machine switches to the next state object.
-When an asynchronous I/O operation completes, the server loop picks up this event and changes the corresponding state object, which eventually triggers the state machine to perform the next logical request-handling step.~\cite{flashwebsrv,seda}
+Instead, the operations are merely initiated and the state machine immediately switches to the next state object.
+The server loop picks up the completion events of these asynchronous I/O operations and changes the corresponding state object accordingly.
+This change in turn eventually triggers the state machine to perform the next logical request-handling step for the request represented by the state object.~\cite{flashwebsrv,seda,c10k}
 
-The difference becomes even clearer when assessing the use of multiple CPU cores:
-\emph{multi-process} and \emph{multi-thread} delegate the task of load balancing between the cores to the OS scheduler, which faces the trade-off between cache-affinity and work-conservation.
-The \emph{event-driven} approach in contrast needs only one thread per physical core, because the event loop never blocks except if no events occur, waiting for event delivery.
-Since events are not bound to a thread but to the process, each event loop on any core can take over processing of new events for any state object, which results in automatic load balancing.\todo{proof}
+For this thesis, the most relevant difference between multi-threaded and event-driven architecture lies in the representation of request-handling state:
+multi-threaded servers encode it implicitly in the thread's execution state, consisting mostly of its stack, registers and instruction-pointer.
+In contrast, event-driven servers explicitly define the finite-state machine and have a dedicated representation of the processing state in the state objects.
+
+While the above description focusses on the role of I/O, nothing stops application developers from partitioning their CPU-bound or memory-intensive request-handling steps using the same mechanism.
+The next sections give an introduction to \emph{staged computation} and \emph{staged event-driven architectures} which build ontop of the event-driven model.
 
 \relworksection{Cohort Scheduling \& Staged Computation}{ch:relwork:cohort}{cohort}
 In the early 2000s, \citeauthor*{cohort} investigated the cache behavior of I/O intensive online-transaction processing workloads (OLTP) in servers following the multi-process or multi-threaded architecture.
