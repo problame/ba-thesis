@@ -164,7 +164,7 @@ However, to increase cache locality in arbitrary parts of an application, the au
 in this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
 A stage has \emph{scheduling autonomy}, which means it is free to choose the concurrency model that suits the type of provided operation best --- cohort scheduling being just one of several options.~\cite{cohort}.
 
-Cohort scheduling at the syscall boundary is non-invasive with regards to application code bases and will we revisited by \emph{computation spreading} (Section~\ref{ch:relwork:compsr}).
+Cohort scheduling at the syscall boundary is non-invasive with regards to application code bases and will we revisited by \emph{computation spreading} (Section~\ref{ch:relwork:compspr}).
 In contrast, staged computation require non-trivial refactorings in existing applications, in particular if they already follow the multi-threaded model:
 synchronous, blocking operations must be converted to asynchronous operations and continuations, and the scheduling autonomy granted to each stage must actually be addressed in code.
 
@@ -342,13 +342,12 @@ Our solution does require hardware virtualization due to limited driver support 
 
 The authors evaluate their solution using full-system simulation of an eight-core machine with private L1 and L2 cache and a shared L3 cache.
 Server applications, which are of primary interest for this thesis, exhibit 25 -- 58\% fewer L2 instruction misses and 9 -- 25\% improved branch misprediction rates.
-Data read misses are less affected, with only 13 -- 19\% decrease for Apache web server and an OLTP application.\todo{leave sentence out?}
+Data read misses are less affected, with only 13 -- 19\% decrease for Apache web server and an OLTP application.
 The approach leads to a speed-up of up to 20\% in Apache and 9.4\% in OLTP measured by the total runtime of the full-system simulation.~\cite{compspr}
 
 Despite the very specific implementation, it should be noted that the concept presented by the authors is more general and not limited to the syscall interface:
 they suggest migration points at arbitrary positions in the application code and corresponding core allocation policies.~\cite{compspr}
 However, we cannot find a proposal to implement this, which is a very welcome segue to the next section.
-
 \todo{hardware-based approaches?} % http://ieeexplore.ieee.org/document/1410076/
 
 \section{Prototype in Linux at the KIT OS Group}\label{ch:relwork:kitpoc}
@@ -394,7 +393,7 @@ The proof-of-concept implementation at the KIT OS group furthermore shows that l
 given an application with a suitable threading model, patches of a few lines are sufficient to reduce i-cache misses and branch-misprediction significantly.
 
 However, its evaluation on an SMP system shows that the solution is not work-conserving due to the following reason:
-imagine a system with ${\frac{\#cores}{stage} > 1}$ and a \ult $U_1$ in stage $S$ executing on a \klt $K_1$.
+imagine a system with multiple cores per stage and a \ult $U_1$ in stage $S$ executing on a \klt $K_1$.
 As described above, $K_1$ is pinned to core $C_1$.
 When $U_1$ performs a blocking syscall, for example waiting to acquire a mutex via \texttt{pthread\_mutex\_lock}, $K_1$ blocks and becomes \texttt{TASK\_INTERRUPTIBLE}.
 The Linux scheduler now dispatches another task $T$ on $C_1$ to maximize CPU utilization, where $T$ is not a $K_i$ of our application.
@@ -431,7 +430,7 @@ This reverts the complex situation of \ults and \klts to a simple 1:1 threading 
 
 The remainder of this thesis presents our design as well as its implementation in the OSv library operating system and the evaluation using microbenchmarks and the TPC-C benchmark with MySQL.\todo{repetitive?}
 
-\chapter{Design \& Implementation}
+\chapter{Design \& Implementation}\label{ch:di}
 In this chapter, we present the design and implementation of our solution following the design proposal at the end of Chapter~\ref{ch:analysis}.
 Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
 related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
