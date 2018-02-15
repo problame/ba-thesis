@@ -241,12 +241,13 @@ In contrast, arbitrary applications will use the pthreads and C standard librari
 either substantial modifications to the code base are necessary to establish a situation as found in SHORE
 or runtime-patching via \textsc{\texttt{ld\_preload}} would be required.
 
-Lastly, it should be noted that STEPS does not cover any code paths in the operating system, because stray threads are removed from their team.
-However, operating system code has a significant cache footprint and thus a potential target for i-cache footprint optimization.~\cite{compspr}
-The situation is worsened by the fact that the stray threads will continue to compete for CPU time while they are not blocked.
-Since the OS scheduler is unaware of the team lists, it may schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
-STEPS tries to prevent this by giving a \textquote{hint} to the scheduler to prioritize the next thread that remained in the team.
-We argue that this kind of information loss cannot be fully compensated by scheduler hints, which also imply interaction with the kernel and thus additionaly overhead.~\cite{steps}
+Lastly, STEPS's handling of stray threads should be considered: recall that stray threads are removed from their team when performing potentially blocking syscalls, and only re-join a team when being re-used for a new high-level operation.~\cite{steps}
+Specifically, this means that STEPS does not account for the instruction footprint of the operating system at all.
+However, \citeauthor*{osCacheFootprint} show that the operating system has a significant cache footprint and should thus be considered when trying to optimize the i-cache footprint.~\cite{osCacheFootprint,compspr} % osCacheFootprint: summary
+Another perspective on the situation is that stray threads will continue to compete for CPU time for the time they are not blocked.
+Since the OS scheduler is unaware of the team lists, it may schedule a stray thread in the midst of a team, evicting its cache state inadvertently.
+STEPS tries to prevent this by giving a \textquote{hint} to the scheduler to prioritize the next thread that remained in the team, but does not elaborate on the additional syscall overhead.
+By proposing a solution that is rooted in the OS's scheduler, we avoid the information loss and implementation complexities associated with STEPS's user-space approach.
 
 \section{Profiling Datacenter Applications}\label{ch:relwork:profiling}
 % alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
