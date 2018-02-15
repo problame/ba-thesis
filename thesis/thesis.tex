@@ -263,9 +263,10 @@ We argue that the designs of cohort scheduling and STEPS must be re-examined giv
 % proof that today's chips are multicore: begin sodaspr
 The single-core machines used in the approaches above have a small L1 cache and a larger, higher-latency L2 cache.
 However, contemporary symmetric multi-processors feature \emph{private} L1 and L2 caches and a \emph{shared} L3 cache.
-Access latency to the L3 cache is orders of magnitude higher than to the private caches. \todo{proof}
+Access latency between L1, L2 and L3 increases by a factor of 3 -- 4 times between each level.
+Out-of-order processing is typically able to mitigate L1 instruction misses but cannot hide L2 misses.\cite{hennessy2002,haswellCacheLatency} %hennessy print page 509
 
-Due to this discrepancy, an adaption of cohort scheduling and STEPS to multiprocessors must target the private caches in order to achieve similar speedups.
+An adaption of cohort scheduling and STEPS to multiprocessors must thus target the private caches to achieve similar benefits.
 More importantly, the existence of private caches per hardware thread introduces the problem and opportunity to allocate this resource:
 in terms of STEPS, multiple steps can now be spread over different cores instead of time-multiplexing the single available L1 i-cache.
 We come back to this observation when assessing \emph{computation spreading} in Section~\ref{ch:relwork:compspr}.
@@ -296,6 +297,8 @@ We observe that a pure user-space approach is inapplicable on contemporary opera
 % growth of i-cache working set over time (speculation: due to product development) => worsens situation
 % => stall cycles, X %
 % memory latency, not band width
+
+% TODO https://software.intel.com/en-us/vtune-amplifier-help-front-end-bound
 While the micro-architectural performance problems caused by large i-cache footprints were already observed in \cite{cohort} and \cite{steps} in the early 2000s,
 recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
 However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation.
