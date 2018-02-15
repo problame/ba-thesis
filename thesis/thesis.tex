@@ -170,10 +170,14 @@ Naturally, the threads must yield the CPU before leaving this shared code segmen
 The size of a cohort represents the central trade-off in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
 Furthermore, since the amortization only reduces the execution time but does not eliminate it, the minimum response time is necessarily increased.
 
-For immediate application, systems calls are proposed as pre-existing synchronisation points.
-However, to increase cache locality in arbitrary parts of an application, the authors present the concept of \emph{staged computation}:
+For immediate application, the authors suggest systems calls as pre-existing synchronisation points because they do not require modifying user-space code.
+However, to increase cache locality in arbitrary parts of an application, the authors propose \emph{staged computation}:
 in this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
 A stage has \emph{scheduling autonomy}, which means it is free to choose the concurrency model that suits the type of provided operation best --- cohort scheduling being just one of several options.
+
+Cohort scheduling at the syscall boundary is non-invasive with regards to application code bases and will we revisited by \emph{computation spreading} (Section~\ref{ch:relwork:compsr}).
+In contrast, staged computation require non-trivial refactorings in existing applications, in particular if they already follow the multi-threaded model:
+synchronous, blocking operations must be converted to asynchronous operations and continuations, and the scheduling autonomy granted to each stage must actually be addressed in code.
 
 \relworksection{Staged Event-Driven Architecture}{ch:relwork:seda}{seda}
 % difference to staged computation: scalabiltiy, graceful degradation, no focus on cache locality
@@ -197,7 +201,11 @@ Additionally, they measure the amount of requests each client completes, definin
 The results show 16--20\% higher throughput at little-varying response times and high fairness among clients in comparison to the the multi-threaded Apache web server. % leave out Flash, not interesting to us
 The authors' explanation for these results is that the SEDA server queues all requests \emph{inside} the application while the multi-threaded Apache web server will not accept new client connections when reaching the maximum size of its thread pool, causing exponentially increasing response times for non-accepted clients due to exponential back-off algorithm employed in TCP.
 
-%Notably, the authors suggest operating systems should support SEDA natively, emphasized by their need to implement asynchronous I/O abstractions for their resource controllers.\todo{leave out?}
+SEDA shows the software-enginnering and performance benefits of staged computation.
+In contrast to the proposal made in this thesis, SEDA requires fitting the application into the provided framework of event handlers and stage controllers.
+This enables customizing the concurrency model and controlling resource usage \emph{per stage}, whereas our solution centralizes this functionality in the OS scheduler.
+Notably, the SEDA authors suggest operating system support for their model, emphasized by their need to implement asynchronous I/O abstractions for their resource controllers.
+While this may facilitate implementation of SEDA itself, it does not address the hurdle of refactoring existing code bases.
 
 \relworksection{STEPS}{ch:relwork:steps}{steps}
 % split up dbms into stages by operators
@@ -244,10 +252,12 @@ In contrast, arbitrary applications will use the pthreads and C standard librari
 either substantial modifications to the code base are necessary to establish a situation as found in SHORE
 or runtime-patching via \textsc{\texttt{ld\_preload}} would be required.
 
-Finally, \citeauthor*{steps} mentions that STEPS gives a hint to the OS scheduler when a thread blocks in order schedule the next regular team member and maximize the usage of the already warm cache.
-The downside of this approach is that code paths in the operating system are not covered by STEPS at all
---- stray threads will continue to compete for CPU time while they are not blocked.
-An OS scheduler unaware of the team lists may thus schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
+Lastly, it should be noted that STEPS does not cover any code paths in the operating system, because stray threads are removed from their team.
+However, operating system code has a significant cache footprint and thus a potential target for i-cache footprint optimization.~\cite{compspr}
+The situation is worsened by the fact that the stray threads will continue to compete for CPU time while they are not blocked.
+Since the OS scheduler is unaware of the team lists, it may schedule a stray threads in the midst of a team, evicting its cache state inadvertently.
+STEPS tries to prevent this by giving a \textquote{hint} to the scheduler to prioritize the next thread that remained in the team.
+We argue that this kind of information loss cannot be fully compensated by scheduler hints, which also imply interaction with the kernel and thus additionaly overhead.~\cite{steps}
 
 \relworksection{Interim: Applicability to SMP Systems}{ch:relwork:cohortsmp}
 The related work we presented so far was evaluated on single-core machines.
