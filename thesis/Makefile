@@ -1,4 +1,5 @@
-SVGS := kit_os_poc_work_conserving
+SVGS := kit_os_poc_work_conserving \
+	kit_os_poc_blocking
 
 ## impl
 

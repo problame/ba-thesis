@@ -371,7 +371,7 @@ for each user-level thread (\ult), there still exists exists a kernel-level thre
 but \klts are pinned once to a specific core and stage.
 \ults run on a \klt of the stage they are currently in and migrate to a different \klt when switching stages.~\cite{sodaspr}% sodaspr:table 1
 
-When a \ult makes a call to switch stages, its context is saved and enqueued into the next stage's ready queue.
+When a \ult makes a call to switch stages, its context is saved and enqueued into the next stage's incoming migrations queue.
 The originating \klt now waits for new \ults on its own stage's incoming migrations queue.
 If it is empty, the \klt makes a blocking syscall \texttt{sys\_dequeue} to a kernel component to wait for incoming migrations.
 The kernel component must ensure that there is always one \klt per core either doing work or actively dequeuing \ults in order to utilize the CPU.
@@ -379,6 +379,14 @@ This is implemented by a callback from the Linux scheduler that informs the kern
 For example, if the currently dequeuing \klt $K_1$ executes a \ult, and that \ult blocks on a mutex, $K_1$ transitions from \texttt{running} to \texttt{blocked}.
 The kernel component must wake up another \klt $K_2$ that is currently waiting for incoming migrations of that stage on that core.
 Otherwise, the core does not perform any work (for the application) until $K_1$ acquires the mutex and becomes \texttt{runnable}.
+Figure~\ref{fig:kit_os_poc_blocking} visualizes this situation.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{fig_build/kit_os_poc_blocking.pdf}
+    \caption{When a \ult issues a blocking syscall, the current \klt blocks. Another \klt must take over executing \ults from the core's queue. Note that while there is a \klt for each \ult, the relationship is not fixed.}
+    \label{fig:kit_os_poc_blocking}
+\end{figure}
 
 The authors evaluate their design with microbenchmarks and performance-counters, showing x\% fewer i-cache misses, y\% fewer mispredicted branches.
 Additionally, a full-system evaluation is made by comparing the benchmark results of the TPC-C OLTP benchmark on Linux 4.X between an upstream and a \emph{stagified} version of MySQL 5.6.38 running on an SMP system with X cores.
