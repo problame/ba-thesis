@@ -285,8 +285,10 @@ all threads in a cohort or team must run on the same core in order to benefit fr
 Furthermore, STEPS and the OS scheduler work actively against each other because the latter will see all threads in a cohort as runnable and actively spread the cohort over all (presumably idle) cores,
 destroying all promised performance benefits.
 
-An easy fix would be a mechanism for STEPS to influence the load balancing in order to favor threads of the same team to stay on the same core, e.g. through thread pinning.
+An easy fix would be a mechanism for STEPS to influence the load balancing in order to favor threads of the same team to stay on the same core, e.g., through thread pinning.
 This is obviously not work-conserving on multi-core systems, requiring additional mechanisms and communication between STEPS and the OS to fix it.
+On a busy system, one could also argue that enough threads are available to simply employ cohort-scheduling per core.
+However, in contrast to the approach of \emph{computation spreading}, this replicates to each core the repeated capacity misses when a team moves to the next step.
 
 We observe that a pure user-space approach is inapplicable on contemporary operating systems, acknowledging the foresight of the SEDA publication that proposes OS support.
 \todo{affinity scheduling --- just ignore it?}
