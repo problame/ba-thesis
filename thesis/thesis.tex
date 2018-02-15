@@ -376,9 +376,9 @@ The originating \klt now waits for new \ults on its own stage's incoming migrati
 If it is empty, the \klt makes a blocking syscall \texttt{sys\_dequeue} to a kernel component to wait for incoming migrations.
 The kernel component must ensure that there is always one \klt per core either doing work or actively dequeuing \ults in order to utilize the CPU.
 This is implemented by a callback from the Linux scheduler that informs the kernel component of task state changes.
-For example, if the currently dequeuing \klt $K_1$ executes a \ult, and that \ult blocks on a mutex, $K_1$ switches to \textsc{\texttt{task\_interruptible}}.
+For example, if the currently dequeuing \klt $K_1$ executes a \ult, and that \ult blocks on a mutex, $K_1$ transitions from \texttt{running} to \texttt{blocked}.
 The kernel component must wake up another \klt $K_2$ that is currently waiting for incoming migrations of that stage on that core.
-Otherwise, the core does not perform any work (for the application) until $K_1$ acquires the mutex and switches back to \textsc{\texttt{task\_running}}.
+Otherwise, the core does not perform any work (for the application) until $K_1$ acquires the mutex and becomes \texttt{runnable}.
 
 The authors evaluate their design with microbenchmarks and performance-counters, showing x\% fewer i-cache misses, y\% fewer mispredicted branches.
 Additionally, a full-system evaluation is made by comparing the benchmark results of the TPC-C OLTP benchmark on Linux 4.X between an upstream and a \emph{stagified} version of MySQL 5.6.38 running on an SMP system with X cores.
@@ -392,23 +392,28 @@ Related work has demonstrated that spreading the working set of an application o
 The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
 given an application with a suitable threading model, patches of a few lines are sufficient to reduce i-cache misses and branch-misprediction significantly.
 
-However, its evaluation on an SMP system shows that the solution is not work-conserving due to the following reason:
+However, its evaluation on an SMP system shows that the solution is not work-conserving as visualized in Figure \ref{fig:kit_os_poc_work_conserving}:
 imagine a system with multiple cores per stage and a \ult $U_1$ in stage $S$ executing on a \klt $K_1$.
 As described above, $K_1$ is pinned to core $C_1$.
-When $U_1$ performs a blocking syscall, for example waiting to acquire a mutex via \texttt{pthread\_mutex\_lock}, $K_1$ blocks and becomes \texttt{TASK\_INTERRUPTIBLE}.
+When $U_1$ performs a blocking syscall, for example when trying to acquire a lock, $K_1$ blocks.
 The Linux scheduler now dispatches another task $T$ on $C_1$ to maximize CPU utilization, where $T$ is not a $K_i$ of our application.
 In fact, all $K_i$ are blocked in \texttt{sys\_dequeue}.
-When $K_1$ finally acquires the mutex and is \texttt{TASK\_RUNNING} again, it is still pinned to $C_1$ because the solution needs this to perform thread migration in user-space.
+When $K_1$ finally acquires the mutex and is \texttt{ready} again, it is still pinned to $C_1$ because the solution needs this to perform thread migration in user-space.
 However, $C_1$ is still executing $T$, not $K_1$, and thus $K_1$ must be put into $C_1$'s ready queue.
 
-The misery at this point is that there may exist \emph{another} CPU $C_2$ where a \klt $K_2$ is dequeuing \ults in the \emph{same stage} $S$:
+The problem at this point is that there may exist \emph{another} CPU $C_2$ where a \klt $K_2$ is dequeuing \ults in the \emph{same stage} $S$:
 if $K_2$ does not have any \ults to execute, $K_1$ should be migrated to $C_2$ immediately when it is woken up and continue execution there, benefiting from the warm on-core caches.
 But the implementation only performs thread migration when a \ult calls the stage switching API.
 There is no mechanism in place to save $K_1$'s state and enqueue it to $K_2$'s incoming migration queue on wake-up.
 One might assume it is possible to enqueue $U_1$ to $K_2$ since we saved its register state on kernel entry via \texttt{pthread\_mutex\_lock}:
 this is not possible because there might still be kernel code that needs to run after the mutex is acquired, before returning to $U_1$.
 
-UML sequence diagram visualizing the pathological case described above.\todo{draw}
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{fig_build/kit_os_poc_work_conserving.pdf}
+    \caption{The proof-of-concept implementation is not work-conserving. When K1 becomes ready it should be dispatched to C2 immediately. But K1 is pinned to C1 due to the implementation of thread migration.}
+    \label{fig:kit_os_poc_work_conserving}
+\end{figure}
 
 We identify several fundamental problems in the approach taken by the proof-of-concept implementation:
 the requirement for fast thread migration drove the design toward a user-space solution which decouples the threads known by the application (\ults) from the threads known by the kernel (\klts).
