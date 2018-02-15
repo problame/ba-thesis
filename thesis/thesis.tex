@@ -334,8 +334,11 @@ For example, in a traditional thread-based concurrency model, each request-handl
 The authors present a solution that temporarily assigns CPU cores to either execute OS code or user-level code, exploring and evaluating several allocation policies.
 Threads entering or leaving the OS synchronously through syscalls, exceptions or page faults are then migrated between compatible cores.~\cite{compspr}
 
-The implementation is based on hardware virtualization allowing for interception of above kernel entries without modifying the (guest) OS or user-space as well as a hardware-provided thread migration mechanism.
-Naturally, this concept requires control or at least cooperation of the software executing in hypervisor mode.
+A central aspect of the implementatio is the thread migration mechanism which is based on hardware virtualization features:
+all synchronous kernel entries are intercepted and used to trigger the thread migration, leaving the \textit{guest} OS and user-space software completely unmodified.~\cite{compspr}
+An easy-to-overlook detail however is that the hardware-based thread migration is only available in hypervisor mode, which means that cooperation from the software executing in this mode is required.
+Deployment in public clouds based on hardware-virtualization is thus only possible with explicit support by the cloud provider and would thus require further work in the hypervisor scheduler.
+Our solution does require hardware virtualization due to limited driver support but implements thread migration in software and can thus be deployed to existing infrastructure.
 
 The authors evaluate their solution using full-system simulation of an eight-core machine with private L1 and L2 cache and a shared L3 cache.
 Server applications, which are of primary interest for this thesis, exhibit 25 -- 58\% fewer L2 instruction misses and 9 -- 25\% improved branch misprediction rates.
