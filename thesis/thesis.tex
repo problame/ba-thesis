@@ -259,10 +259,39 @@ Since the OS scheduler is unaware of the team lists, it may schedule a stray thr
 STEPS tries to prevent this by giving a \textquote{hint} to the scheduler to prioritize the next thread that remained in the team.
 We argue that this kind of information loss cannot be fully compensated by scheduler hints, which also imply interaction with the kernel and thus additionaly overhead.~\cite{steps}
 
+\relworksection{Profiling Datacenter Applications}{ch:relwork:profiling}{kanev2015profiling}
+% alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
+% dominant are the d-cache misses, but i-cache misses are also significantly higher than usual 
+% growth of i-cache working set over time (speculation: due to product development) => worsens situation
+% => stall cycles, X %
+% memory latency, not band width
+
+% TODO https://software.intel.com/en-us/vtune-amplifier-help-front-end-bound
+While the micro-architectural performance problems caused by large i-cache footprints were already observed in \cite{cohort} and \cite{steps} in the early 2000s,
+recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
+However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation.
+
+\citeauthor*{kanev2015profiling} identify a significantly higher amount of pipeline stalls in real-world datacenter applications when compared to the SPEC CPU2006 benchmark.
+Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
+a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
+the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
+In particular, the authors find that more than 5\% of cycles are wasted due to empty front-end buffers, which is attributed to instruction read misses in the private L2 cache, resulting in slow accesses to the CPU's shared last level cache.
+Additionally, the observations confirm that applications under active development grow in their instruction working set, worsening the situation.%
+\footnote{The authors present exemplary results of up to 27\% per year.}
+The authors do not explicitly investigate why datacenter applications have such large instruction working sets but mentioning \textquote{lukewarm} code and static linking as possible contributors.
+
+In comparison to the work published a decade earlier (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}),
+\citeauthor*{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
+approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU time in the scheduler alone.
+Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
+Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.
+
+Looking at the related work presented so far, we conclude that for more than 15 years, typical datacenter applications have been observed to exhibit high i-cache-miss and branch-misprediction rates, resulting in sub-optimal use of the available CPU resources and motivting continued research in this field.
+
 \relworksection{Interim: Applicability to SMP Systems}{ch:relwork:cohortsmp}
-The related work we presented so far was evaluated on single-core machines.
+Cohort scheduling, SEDA and STEPS were all evaluated on single-core machines.
 Adaption to multi-core systems is not mentioned at all or stays theoretical.~\cite{steps,harizopoulos2003case}
-We argue that the designs of cohort scheduling and STEPS must be re-examined given the ubiquity of multi-processor systems.
+Given today's ubiquitous multi-processors and the ongoing relevance of high i-cache footprints, re-examining the applicability of the above approaches seems appropriate.
 
 \subsection{Private Caches}
 % All numbers by example: My Haswell against STEPS CPU
@@ -298,37 +327,12 @@ destroying all promised performance benefits.
 An easy fix would be a mechanism for STEPS to influence the load balancing in order to favor threads of the same team to stay on the same core, e.g., through thread pinning.
 This is obviously not work-conserving on multi-core systems, requiring additional mechanisms and communication between STEPS and the OS to fix it.
 On a busy system, one could also argue that enough threads are available to simply employ cohort-scheduling per core.
-However, in contrast to the approach of \emph{computation spreading}, this replicates to each core the repeated capacity misses when a team moves to the next step.
+However, in contrast to the approach of \emph{computation spreading} presented in the next section, this replicates to each core the repeated capacity misses when a team moves to the next step.
 
-We observe that a pure user-space approach is inapplicable on contemporary operating systems, acknowledging the foresight of the SEDA publication that proposes OS support.
-\todo{affinity scheduling --- just ignore it?}
-
-\relworksection{Profiling Datacenter Applications}{ch:relwork:profiling}{kanev2015profiling}
-% alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
-% dominant are the d-cache misses, but i-cache misses are also significantly higher than usual 
-% growth of i-cache working set over time (speculation: due to product development) => worsens situation
-% => stall cycles, X %
-% memory latency, not band width
-
-% TODO https://software.intel.com/en-us/vtune-amplifier-help-front-end-bound
-While the micro-architectural performance problems caused by large i-cache footprints were already observed in \cite{cohort} and \cite{steps} in the early 2000s,
-recent profiling work at Google shows that computer architecture is still not able to satisfy the requirements of contemporary scale-out applications.
-However, the potential performance gains and cost savings due to improved cache behavior become relevant at scale, motivating a re-assessment of the situation.
-
-\citeauthor*{kanev2015profiling} identify significantly higher amount of pipeline stalls in real-world datacenter software when compared to the SPEC CPU2006 benchmark.
-Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
-a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
-the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
-In particular, the authors find that more than 5\% of cycles are wasted due to empty front-end buffers, which is attributed to instruction read misses in the private L2 cache, resulting in slow accesses to the CPU's shared last level cache.
-Additionally, the observations confirm that applications under active development grow in their instruction working set, worsening the situation.%
-\footnote{The authors present exemplary results of up to 27\% per year.}
-The authors do not explicitly investigate why datacenter applications have such large instruction working sets but mentioning \textquote{lukewarm} code and static linking as possible contributors.
-
-In comparison to the work published a decade earlier (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}),
-\citeauthor*{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
-approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU time in the scheduler alone.
-Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
-Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.
+The above assessment shows that cohort scheduling, SEDA and STEPS cannot be directly applied to today's multi-processor systems.
+The availability of private caches per core must be accounted for and new requirements such as load balancing between cores must be addressed.
+However, given the ongoing relevance of the problems identified more than 15 years ago, we continue this chapter by investigating publications that explicitly target multi-processor systems.
+\todo{s/multi-processor/multi-core/?}
 
 \relworksection{Computation Spreading}{ch:relwork:compspr}{compspr}
 % TODO: related and actually more relevant to our approach: Computation Spreading
