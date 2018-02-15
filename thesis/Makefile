@@ -1,5 +1,6 @@
 SVGS := kit_os_poc_work_conserving \
-	kit_os_poc_blocking
+	kit_os_poc_blocking \
+	cohort_and_steps
 
 ## impl
 

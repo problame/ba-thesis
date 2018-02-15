@@ -225,6 +225,17 @@ we imagine three contex-switching points $A$, $B$ and $C$ and a team of ten thre
 After the last thread reaches $B$, the team moves forward to the next step  \textit{$B$ to $C$}.
 Although the first thread executing this step will incur capacity i-cache misses, it pre-warms i-cache and branch predictors for the remaining nine threads.~\cite{steps}
 
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{fig_build/cohort_and_steps.pdf}
+    \caption{
+        Idealized scenario of three threads (different colors) executing the same code path that does not fit into the L1 cache.
+        \textbf{Left}: each thread passes through the code completely before yielding CPU to the next thread.
+        \textbf{Right}: team of threads trickles down the code path in code segments that do not exceed the L1 i-cache size.
+    }
+    \label{fig:cohort_and_steps}
+\end{figure}
+
 Blocking threads or threads aborting the transaction, would fall behind in this trickle-down schema and thus replace their ex-team members' cache state.
 The solution is to remove threads aborting their transaction or blocking for synchronization and I/O from the team list and track them as \emph{stray threads}.
 The publications on STEPS describe that the thread package in SHORE required modification to support this schema, but falls short on implementation details.
