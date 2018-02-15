@@ -305,7 +305,7 @@ We recall from Section~\ref{ch:relwork:cohort} that the scheduling trade-off in 
 However, the real parallelism available on SMP systems brings with it another scheduling dimension that STEPS and cohort scheduling do not address:
 to utilize the available hardware threads, load must be balanced among them to maximize resource utilization.
 This goal surpasses response time since as the primary scheduling goal since the the service provider generally pays for the number of cores, not their actual usage.\todo{well actually... cpu time accounting}
-All relevant operating systems abstract CPU cores through threads, and the OS scheduler implements load balancing by migrating threads between cores, often directed by metrics such as the length of each core's the ready queue (\emph{load}). \todo{proof}
+All relevant operating systems abstract CPU cores through threads, and the OS scheduler implements load balancing by migrating threads between cores, often directed by metrics such as the length of each core's the ready queue (\emph{load}).~\cite{freeBSDSchedulerLoad}
 
 Cohort scheduling and STEPS were not designed for this situation because
 %both solutions include \emph{batching} as a central element, either at the syscall boundary or at arbitrary points in the application code (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}).
