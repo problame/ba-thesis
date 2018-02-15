@@ -106,12 +106,12 @@ Finally, we evaluate our implementation in Chapter~\ref{ch:eval}, using both syn
 High-performance network servers must handle requests at a degree of concurrency that exceeds the real parallelism provided by hardware in the form of CPU cores.
 Much research has gone into techniques to handle this problem, further constrained by additional requirements such as predictable response times and fairness among clients.
 This chapter starts with an overview of the prevalent concurrency models in the early 2000s' software landscape.
-We proceed with an introduction to \emph{cohort scheduling} and \emph{staged computation} which stem from the same time period
-and summarize \emph{STEPS}, which applies above proposals to a research database management system, showing that significant performance improvements due to reduced i-cache misses and better branch prediction are possible.
-However, these systems were evaluated on single-core machines in the early 2000s.
-In an interim section, we take a step back and analyze the applicability of these ideas to contemporary multi-processor systems and memory hierarchies, coming to the conclusion that major redesigns are required in order to provide work-conserving solutions.
-Large-scale profiling at Google from 2015 shows that the problems observed more than a decade before are still prevalent in today's datacenters applications.
-Motivated by the ongoing relevance of the topic and a changed hardware landscape we explore \emph{computation spreading}, a technique that explicitly targets SMP systems showing that thread migration can help use their memory hierarchy more effectively.
+We proceed with an introduction to \emph{cohort scheduling}, \emph{staged computation} and \emph{staged event-driven architecture} which stem from the same time period
+and present \emph{STEPS}, which applies above concepts to a research database management system, showing that these software-only solutions lead to performance improvements due to reduced i-cache misses and better branch prediction.
+Despite these in reasearch systems, large-scale profiling at Google from 2015 shows that the memory hierarchy in contemporary processors is still sub-optimal for typical datacenter applications.
+Given that the above approaches targeted single-core machines from the early 2000s, we take a step back and analyze their applicability to today's multi-processor systems and memory hierarchies,
+coming to the conclusion that major redesigns are required in order to provide work-conserving solutions.
+Motivated by the ongoing relevance of the topic and a changed hardware landscape, we explore \emph{computation spreading}, a technique that explicitly targets SMP systems and uses thread migration to spread the instruction working set of a thread over multiple CPU cores.
 We conclude this chapter with a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code, forming the basis for this thesis.
 
 \section{Network Servers \& Concurrency}\label{ch:relwork:concmod}
