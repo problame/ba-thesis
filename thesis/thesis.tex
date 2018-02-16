@@ -275,7 +275,7 @@ However, the potential performance gains and cost savings due to improved cache 
 \citeauthor*{kanev2015profiling} identify a significantly higher amount of pipeline stalls in real-world datacenter applications when compared to the SPEC CPU2006 benchmark.
 Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
 a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
-the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
+the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.\todo{do not require pre-existing knowledge about arch}
 In particular, the authors find that more than 5\% of cycles are wasted due to empty front-end buffers, which is attributed to instruction read misses in the private L2 cache, resulting in slow accesses to the CPU's shared last level cache.
 Additionally, the observations confirm that applications under active development grow in their instruction working set, worsening the situation.%
 \footnote{The authors present exemplary results of up to 27\% per year.}
