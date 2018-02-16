@@ -217,7 +217,7 @@ While this may facilitate implementation of SEDA itself, it does not address the
 The \emph{Synchronized Transactions through Explicit Processor Scheduling} (STEPS) project implements a derivative of cohort scheduling in the research database system SHORE.~\cite{shore}
 
 The authors replicate the observation of \cite{cohort} for database systems: the execution flow exhibits low spatial locality and do not fit into the CPU caches, leading to pipeline stalls and a high amount of mispredicted branches.
-In contrast to cohort scheduling, STEPS groups threads handling a transaction into \emph{team lists} organized by high-level operation (e.g., \texttt{INSERT}, \texttt{UPDATE}).
+In contrast to cohort scheduling, STEPS groups threads handling a transaction into \emph{team lists} organized by high-level operation (e.g., \texttt{\textsc{insert}}, \texttt{\textsc{update}}.
 The code path of the operation then contains context-switching points (\textit{\texttt{CTX} calls}) at which the currently executing thread yields control to the next member of its team list, which amounts to user-mode round-robin scheduling within a team.
 Context-switching points are placed such that the working set between two of them fits into the CPU's L1 i-cache.
 The idea of cohort scheduling is found in the step-by-step progression over the long code path of the high-level operation:
