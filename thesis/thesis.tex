@@ -289,7 +289,7 @@ Given that at least a portion of these threads will be part of network servers, 
 
 Looking at the related work presented so far, we conclude that for more than 15 years, typical datacenter applications have been observed to exhibit high i-cache-miss and branch-misprediction rates, resulting in sub-optimal use of the available CPU resources and motivting continued research in this field.
 
-\section{Interim: Applicability to SMP Systems}
+\section{Interim: Applicability to SMP Systems}\label{ch:relwork:anasmp}
 Cohort scheduling, SEDA and STEPS were all evaluated on single-core machines.
 Adaption to multi-core systems is not mentioned at all or stays theoretical.~\cite{steps,harizopoulos2003case}
 Given today's ubiquitous multi-processors and the ongoing relevance of high i-cache footprints, re-examining the applicability of the above approaches seems appropriate.
@@ -455,29 +455,59 @@ This reverts the complex situation of \ults and \klts to a simple 1:1 threading 
 The remainder of this thesis presents our design as well as its implementation in the OSv library operating system and the evaluation using microbenchmarks and the TPC-C benchmark with MySQL.\todo{repetitive?}
 
 \chapter{Design \& Implementation}\label{ch:di}
-In this chapter, we present the design and implementation of our solution following the design proposal at the end of Chapter~\ref{ch:analysis}.
-Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
-related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
-and demonstrated lower cache miss rates in the MySQL database server, which follows the thread-per-request model with a pool of pre-spawned threads.
-We re-use their tested stage definitions in MySQL \todo{KIT OS group} and focus on the implementation of a work-conserving scheduling policy.
-\cite{kanev2015profiling,mysqlThreading}\todo{KIT OS group}
+In this chapter, we present our solution to reduce i-cache misses and branch-misprediction in server applications with minimal manual changes required to the their source code.
+We explicitly target multi-processor systems, addressing the shortcomings of the 2000s-era solutions in this field (see Section~\ref{ch:relwork:anasmp}).
+We avoid the design-fallacies of previous user-space solutions and propose an operating-system-based approach implemented in the OSv library OS.%, allowing for clean modeling of our design in  a modern C++ codebase.
 
-The limited compatibility with threading models is not a major limitation of our design:
-our approach aims at reaping the benefits of staged computation in legacy applications that cannot be easily refactored to a staged-computation model.
-Thread-pools and per-request threads were the dominant threading model in the last TODO years and are in fact still used in new applications today.
-We acknowledge that more recent runtimes with event-driven concurrency or M:N scheduling models are incompatible with our approach, unless programmers manually construct the supported threading models on top of them.\todo{proof}\todo{discussion section?}
+% appdev perspective: stage api, must parition the code between stages (see STEPS) + stack-based  API with lock-guards, simplifying adoption
+% implementation then allocates cores to stages depending on 'load' of the stage and tracks which stage a thread is currently in
+% when thread switches stages, the allocation policy is evaluated and the least-loaded core (run-queue length) is chosen as migration target
+% when a thread blocks, it is simply removed from the core's local ready queue. when woken up again, the allocation policy is evaluated and the threadd migrated to the least-loaded core
+% the promise is the same as in computation spreading and the proof-of-concept: pre-warmed caches.
+% the obvious trade-off: thread migratino cost vs advantage of warm caches
 
-The following enumeration provides an overview of our contributions:
-\begin{enumerate}
-    \item We implement our solution in the OSv library operating system, which provides Linux-ABI compatibility and runs on Linux/KVM hypervisor.~(Section~\ref{ch:di:osv})
-    \item We remove the existing load balancing and fairness mechanisms from OSv's scheduling policy, replacing it with non-preemptive round-robin per CPU core.~(Section~\ref{ch:di:rmsched})
-    \item We add a user-space API to define stages and switch between them.~(Section~\ref{ch:di:api})
-    \item We implement a fast thread migration mechanism that does not use inter-processor interrupts.~(Section~\ref{ch:di:mig})
-    \item On wake-up of a thread, we load-balance between the CPU cores of its current stage, using thread migration as necessary.~(Section~\ref{ch:di:workcons})
-    \item We add an allocation policy for CPUs to stages that maximizes throughput by removing bottleneck stages.~(Section~\ref{ch:di:pol})
-\end{enumerate}
-Each section starts with the reasoning behind our design followed by our implementation strategy in OSv as well as the refactorings it required.
-We refer to the relevant commits in the Git repository of our modified version of OSv as appropriate.
+From an application developer's perspective, our solution provides a system API allowing to define \emph{stages} as objects and switch between them through function calls.
+Stages distinguish themselves through ideally disjoint instruction working sets where each on its own fits into the private cache of the CPU cores.
+The application developer inserts stage switching calls into the request-handling code path, thus partitioning its total instruction working set into stages.
+For example, a request-handler will
+\begin{enumerate*}[label=(\alph*)]
+    \item read the request data from a socket, using the network stack,
+    \item deserialze \& parse it,
+    \item  perform the requested operation,\label{en:di:ov:processing}
+    \item serialize the response and
+    \item send it back to  the client.
+\end{enumerate*}
+While not true for all types of servers, database systems for example exhibit a a significant i-cache footprint in step~\ref{en:di:ov:processing} \emph{per high-level SQL operation} (see Section~\ref{ch:relwork:steps}).
+In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
+Before calling \texttt{read} on the network socket, the developer would then switch to the network-stack-stage.
+
+On the system side, we track the association of threads and their current stage in the thread's TCB and per stage the number of threads currently associated with it.
+We use this data to allocate the available CPU cores proportionally among the defined stages, thus dedicating an integer number of cores to each stage.
+The system follows the following guiding principle: \textbf{threads are only dispatched on cores that are allocated to the thread's current stage}.
+When a thread uses the system API to switch to a stage S, we choose the least-loaded core C among the cores allocated to S and enqueue the switching thread into C's runqueue.
+The other event is where a blocked thread is woken up: on block, a thread is removed from the CPU's runqueue but its stage association is left untouched.
+When the thread is later woken up again, the \emph{waker} evaluates the core allocation policy and enqueues the still-sleeping thread into the target CPU's runqueue.
+The scheduling policy empoloyed per core is non-preemptive round-robin. \todo{we should actually try preemptive}
+
+\begin{figure}[h]
+    \missingfigure[width=0.8\textwidth]{visualize the solution}
+    \caption{TODO}
+\end{figure}
+
+The promise behind this approach is the same as in computation spreading and the proof-of-concept implementation at the KIT OS group (Chapter~\ref{ch:relwork}):
+by dedicating CPU cores and hence their private caches to a stage and scheduling threads exclusively on the cores of their current stages, the i-cache always contains the instruction working set of all threads in the CPU's runqueue.
+This reduces instruction cache misses, pipeline stalls and mispredicted branches, resulting in faster execution of the stage's code and cheaper context switches on the CPU. \todo{an argument for preemptive round robin}
+In contrast to cohort scheduling, spreading the instruction working set over the private caches allows the code to be cache-resident for the whole time of the CPU core allocation. \todo{possible benefits of this, are there? otherwise, it's part of the break-even calc, see paper}
+The difference to the computation spreading implementation is we do not rely on virtualization hardware features for thread migration and that we allow migration points at arbitrary points in the application instead of just the kernel boundary.
+Unlike STEPS and the proof-of-concept, we do not supplement an unaware kernel scheduler with a user-space model but make stages a first-class concept of the scheduler instead.
+
+The remainder of this chapter presents our design and its implementation in detail:
+Section~\ref{ch:di:osv} gives an introduction to the OSv library operating system, providing the knowledge required to understand the implementation constraints we faced.
+We proceed with details on the user-space API illustrated with examples (Section~\ref{ch:di:api}), followed by the design of our thread migration mechanism (Section~\ref{ch:di:mig}).
+In Section~\ref{ch:di:wake}, we explain the details involving the wake-up mechanism which required significant re-working of OSv's thread state tracking.
+Section~\ref{ch:di:pol} then presents the CPU core allocation policy.
+We conclude with a discussion of the trade-offs made in our design in Section~\ref{ch:di:discuss}.
+Where appropriate, we refer to the relevant commits in the Git repository of our modified version of OSv.
 
 \section{The OSv Library Operating System}\label{ch:di:osv}
 % what is osv, how does it work:
@@ -510,16 +540,6 @@ For details, we refer to the TODO paper.
     \item thread states => state diagram
 \end{itemize}
 
-\section{Removal of OSv Scheduling Policy}\label{ch:di:rmsched}
-% remove load balancing + fairness (cpu time, priority queue / sorted list? )
-% stub out pthreads_sched_setaffinity_np + remove dead thread migration code (why did we do that?)
-% implement simple CPU-local non-preeemptive round-robin: non-preemptive is ok because handlers will finish and is good for cache performance (see stagedExecutionDBMS, p5 up left, p10 5.1.2)
-% describe outcome:
-%   cpu-local runqueues, round robin, non-preemption (OKish because threads always finish, while not really fair...)
-%   existing thread migration mechanism still required by percpu threads, but only on startup
-%   idle threads are always runnable, dequeue incoming migrations per CPU
-%   
-\blindtext
 \section{User-Space API}\label{ch:di:api}
 % Define stages as objects in the kernel
 % User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
@@ -549,7 +569,7 @@ For details, we refer to the TODO paper.
 %           => target CPU only dequeues those threads that are in stagemig_sto to its runqueue, others are still executing code on the source CPU
 % => State diagram with changes made in this step
 \blindtext
-\section{Work Conservation}\label{ch:di:workcons}
+\section{Work Conservation}\label{ch:di:wake}
 % Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
 %             when a thread is woken up, it will be enqueued inot the runqueue of the CPU where it went to sleep
 %             if that CPU is already executing a thread but another one of the same stage is idle, we do not use the available resources efficiently
@@ -570,6 +590,15 @@ For details, we refer to the TODO paper.
 \blindtext
 
 \section{Stage-Aware Scheduling Policy}\label{ch:di:pol}
+% remove load balancing + fairness (cpu time, priority queue / sorted list? )
+% stub out pthreads_sched_setaffinity_np + remove dead thread migration code (why did we do that?)
+% implement simple CPU-local non-preeemptive round-robin: non-preemptive is ok because handlers will finish and is good for cache performance (see stagedExecutionDBMS, p5 up left, p10 5.1.2)
+% describe outcome:
+%   cpu-local runqueues, round robin, non-preemption (OKish because threads always finish, while not really fair...)
+%   existing thread migration mechanism still required by percpu threads, but only on startup
+%   idle threads are always runnable, dequeue incoming migrations per CPU
+%   
+%
 % TODO read harizopoulos, affninity scheduligng in staged servers and make sure we are not in stark contrast to their results... one argument for that could be that they focus on single CPUs and only have stiefmütterlich solution for mulitple CPUs (see section 6)
 % Difference to STEPS: we target multi- to manycore go conceptually, 
 
@@ -604,6 +633,24 @@ For details, we refer to the TODO paper.
 %               ... see patch, fairly boring
 %               max_stages, snapshot runqueue counters 
 \blindtext
+
+\section{Discussion}\label{ch:di:discuss}
+The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
+More elaborate discussion on design trade-offs is deferred to then end of this chapter and the evaluation.
+
+
+
+Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
+related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
+and demonstrated lower cache miss rates in the MySQL database server, which follows the thread-per-request model with a pool of pre-spawned threads.
+We re-use their tested stage definitions in MySQL \todo{KIT OS group} and focus on the implementation of a work-conserving scheduling policy.
+\cite{kanev2015profiling,mysqlThreading}\todo{KIT OS group}
+
+The limited compatibility with threading models is not a major limitation of our design:
+our approach aims at reaping the benefits of staged computation in legacy applications that cannot be easily refactored to a staged-computation model.
+Thread-pools and per-request threads were the dominant threading model in the last TODO years and are in fact still used in new applications today.
+We acknowledge that more recent runtimes with event-driven concurrency or M:N scheduling models are incompatible with our approach, unless programmers manually construct the supported threading models on top of them.\todo{proof}\todo{discussion section?}
+
 
 \chapter{Evaluation}\label{ch:eval}
 In this section, we present the evaluation of our design.
