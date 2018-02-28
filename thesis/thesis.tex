@@ -455,58 +455,54 @@ This reverts the complex situation of \ults and \klts to a simple 1:1 threading 
 The remainder of this thesis presents our design as well as its implementation in the OSv library operating system and the evaluation using microbenchmarks and the TPC-C benchmark with MySQL.\todo{repetitive?}
 
 \chapter{Design \& Implementation}\label{ch:di}
-In this chapter, we present our solution to reduce i-cache misses and branch-misprediction in server applications with minimal manual changes required to the their source code.
-We explicitly target multi-processor systems, addressing the shortcomings of the 2000s-era solutions in this field (see Section~\ref{ch:relwork:anasmp}).
-We avoid the design-fallacies of previous user-space solutions and propose an operating-system-based approach implemented in the OSv library OS.%, allowing for clean modeling of our design in  a modern C++ codebase.
+Certain classes of datacenter applications exhibit large instruction working sets that do not fit into the private cache of commodity processors.
+On a micro-architectural level, this leads to underutilization of the cores' available computing resources, and thus worse application performance.
+This chapter presents our operating-system-based solution to mitigate this problem in multi-threaded servers which handle client connections in threads, each following the same, sequential, potentially blocking, code path.
 
-% appdev perspective: stage api, must parition the code between stages (see STEPS) + stack-based  API with lock-guards, simplifying adoption
-% implementation then allocates cores to stages depending on 'load' of the stage and tracks which stage a thread is currently in
-% when thread switches stages, the allocation policy is evaluated and the least-loaded core (run-queue length) is chosen as migration target
-% when a thread blocks, it is simply removed from the core's local ready queue. when woken up again, the allocation policy is evaluated and the threadd migrated to the least-loaded core
-% the promise is the same as in computation spreading and the proof-of-concept: pre-warmed caches.
-% the obvious trade-off: thread migratino cost vs advantage of warm caches
-
-From an application developer's perspective, our solution provides a system API allowing to define \emph{stages} as objects and switch between them through function calls.
-Stages distinguish themselves through ideally disjoint instruction working sets where each on its own fits into the private cache of the CPU cores.
-The application developer inserts stage switching calls into the request-handling code path, thus partitioning its total instruction working set into stages.
+From an application developer's perspective, we provide a system API allowing to define \emph{stages} as objects and switch between them through function calls.
+Stages represent ideally disjoint instruction working sets, each fitting into the private cache of a CPU core.
+The application developer \emph{stagifies} their application by inserting stage switching calls into the request-handling code path, thus partitioning its total instruction working set into stages.
 For example, a request-handler will
 \begin{enumerate*}[label=(\alph*)]
-    \item read the request data from a socket, using the network stack,
-    \item deserialze \& parse it,
-    \item  perform the requested operation,\label{en:di:ov:processing}
-    \item serialize the response and
-    \item send it back to  the client.
+    \item read the request data from a socket, using the network stack, \label{en:di:ov:read}
+    \item deserialze \& parse it, \label{en:di:ov:des}
+    \item perform the requested operation,\label{en:di:ov:processing}
+    \item serialize the response and \label{en:di:ov:ser}
+    \item send it back to  the client. \label{en:di:ov:write}
 \end{enumerate*}
-While not true for all types of servers, database systems for example exhibit a a significant i-cache footprint in step~\ref{en:di:ov:processing} \emph{per high-level SQL operation} (see Section~\ref{ch:relwork:steps}).
+While not true for all types of servers, database systems for example exhibit a a significant i-cache footprint in step~\ref{en:di:ov:processing} per high-level SQL operation (see Section~\ref{ch:relwork:steps}).
 In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
-Before calling \texttt{read} on the network socket, the developer would then switch to the network-stack-stage.
+Before calling \texttt{read} or \texttt{write} on the network socket, the developer would then switch to the network-stack-stage.
+It must be emphasized that stages do not form a pipeline: \ref{en:di:ov:read} and \ref{en:di:ov:write} form one stage because they share the network stack code, as do \ref{en:di:ov:des} and \ref{en:di:ov:ser} because they both use the serialization library.
 
-On the system side, we track the association of threads and their current stage in the thread's TCB and per stage the number of threads currently associated with it.
-We use this data to allocate the available CPU cores proportionally among the defined stages, thus dedicating an integer number of cores to each stage.
-The system follows the following guiding principle: \textbf{threads are only dispatched on cores that are allocated to the thread's current stage}.
-When a thread uses the system API to switch to a stage S, we choose the least-loaded core C among the cores allocated to S and enqueue the switching thread into C's runqueue.
-The other event is where a blocked thread is woken up: on block, a thread is removed from the CPU's runqueue but its stage association is left untouched.
-When the thread is later woken up again, the \emph{waker} evaluates the core allocation policy and enqueues the still-sleeping thread into the target CPU's runqueue.
-The scheduling policy empoloyed per core is non-preemptive round-robin. \todo{we should actually try preemptive}
+Given a stagified application, our solution then tracks per thread the association to its current stage in the TCB and per stage the number of threads currently associated with it.
+We use this information to allocate CPU cores among the defined stages proportional to the stages' load.
+A core is thus always allocated to exactly one stage. % however, a stage may not have any dedicated cores. only tell that in the details section
+The scheduler then implements the following guiding principle: \textbf{A thread is only dispatched on cores that are allocated to the thread's current stage}.
+When a thread uses the system API to switch to a stage $S$, we choose the least-loaded core $C$ among the cores allocated to $S$ and enqueue the switching thread into $C$'s runqueue.
+When a thread blocks, it no longer counts toward the load of stage but does not lose the association to it.
+Thus, when a blocked thread is woken up again, the \emph{waker} simply evaluates the core allocation policy and enqueue the still-sleeping thread into the target core's runqueue.
 
 \begin{figure}[h]
-    \missingfigure[width=0.8\textwidth]{visualize the solution}
+    \missingfigure{visualize the solution}
     \caption{TODO}
 \end{figure}
 
 The promise behind this approach is the same as in computation spreading and the proof-of-concept implementation at the KIT OS group (Chapter~\ref{ch:relwork}):
-by dedicating CPU cores and hence their private caches to a stage and scheduling threads exclusively on the cores of their current stages, the i-cache always contains the instruction working set of all threads in the CPU's runqueue.
+\textbf{By dedicating CPU cores and hence their private caches to a stage and by scheduling threads exclusively on the cores of their current stages, the i-cache always contains the instruction working set of all threads in the CPU's runqueue.}
 This reduces instruction cache misses, pipeline stalls and mispredicted branches, resulting in faster execution of the stage's code and cheaper context switches on the CPU. \todo{an argument for preemptive round robin}
-In contrast to cohort scheduling, spreading the instruction working set over the private caches allows the code to be cache-resident for the whole time of the CPU core allocation. \todo{possible benefits of this, are there? otherwise, it's part of the break-even calc, see paper}
-The difference to the computation spreading implementation is we do not rely on virtualization hardware features for thread migration and that we allow migration points at arbitrary points in the application instead of just the kernel boundary.
-Unlike STEPS and the proof-of-concept, we do not supplement an unaware kernel scheduler with a user-space model but make stages a first-class concept of the scheduler instead.
+
+Our solution is specific to certain types of server applications and thus not suitable as a general-purpose scheduling policy.
+Ideally, we would thus extend an existing scheduler such as the Linux CFS.
+However, this is out of scope of this thesis due to the expected design and implementation complexity.
+Instead, we implement our solution in the OSv library operating system, a small kernel that is bundled with an application into an appliance-like virtual machine image.
 
 The remainder of this chapter presents our design and its implementation in detail:
 Section~\ref{ch:di:osv} gives an introduction to the OSv library operating system, providing the knowledge required to understand the implementation constraints we faced.
 We proceed with details on the user-space API illustrated with examples (Section~\ref{ch:di:api}), followed by the design of our thread migration mechanism (Section~\ref{ch:di:mig}).
 In Section~\ref{ch:di:wake}, we explain the details involving the wake-up mechanism which required significant re-working of OSv's thread state tracking.
 Section~\ref{ch:di:pol} then presents the CPU core allocation policy.
-We conclude with a discussion of the trade-offs made in our design in Section~\ref{ch:di:discuss}.
+We conclude with a discussion of the limitations and trade-offs of our design in Section~\ref{ch:di:discuss}.
 Where appropriate, we refer to the relevant commits in the Git repository of our modified version of OSv.
 
 \section{The OSv Library Operating System}\label{ch:di:osv}
@@ -638,7 +634,9 @@ For details, we refer to the TODO paper.
 The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
 More elaborate discussion on design trade-offs is deferred to then end of this chapter and the evaluation.
 
-
+%In contrast to cohort scheduling, spreading the instruction working set over the private caches allows the code to be cache-resident for the whole time of the CPU core allocation. \todo{possible benefits of this, are there? otherwise, it's part of the break-even calc, see paper}
+%The difference to the computation spreading implementation is we do not rely on virtualization hardware features for thread migration and that we allow migration points at arbitrary points in the application instead of just the kernel boundary.
+%Unlike STEPS and the proof-of-concept, we do not supplement an unaware kernel scheduler with a user-space model but make stages a first-class concept of the scheduler instead.
 
 Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
 related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
