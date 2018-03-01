@@ -571,9 +571,85 @@ This avoids flooding the target CPU with IPIs from different cores.
 
 \todo{mention that they could use mwait here? we need that in the evaluation}
 
+
+\section{The Stage API: The Application Developer's Perspective}\label{ch:di:api}
 % User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
 % Stack structure for implementation comfort, describe idea behind stack structure & guards -> spans, like in web browser
-\blindtext
+Our scheduling policy spreads an application's working set over the private caches of all available CPU cores by scheduling a thread only on those cores that have its current stage's code in their private cache.
+We require developers to manually \emph{stagify} their applications by defining stages and inserting switchting calls into the request-handling code path.
+In order to facilitate adoption, the primary design goal for the stage API is thus to be as non-invasive as possible.
+Figure \ref{fig:di:api:exampleraw} gives an impression of how the stage API could be used in an existing application:
+
+\begin{figure}[h]
+\begin{lstlisting}[style=figurecpp]
+#include <osv/stagesched.h>
+
+sched::stage *s_net, *s_ser, *s_db;
+
+int main() {
+  s1 = stage::define("net");
+  s2 = stage::define("serialization");
+  s3 = stage::define("db");
+  // ... start threads
+}
+
+void request_handler(database db, net::conn c) {
+  s_net->enqueue();
+  buf b = c.recv();
+  s_ser->enqueue();
+  req req = sql::parse(b);
+  s_db->enqueue();
+  response resp = db.handle_request(req);
+  s_ser->enqueue();
+  buf b = sql::respond(resp);
+  s_net->enqueue();
+  c.send(b);
+}
+\end{lstlisting}
+\caption{Example for a stagified application using the stage API in pseudo C++. Because we implement our solution in OSv, we can simply use pointers to the kernel objects representing stages.}
+\label{fig:di:api:exampleraw}
+\end{figure}
+
+In addition to the direct switching calls, we provide a RAII-style data-structure reminiscent of the C++11 lock guards to switch to a stage for the lifetime of a block.
+This shifts the responsibility of switching stages from the function caller to the callee:
+
+\begin{figure}[h]
+\begin{lstlisting}[style=figurecpp]
+#include <osv/stagesched.h>
+
+sched::stage *s_net, *s_ser, *s_db;
+
+int main() {
+  s1 = stage::define("net");
+  s2 = stage::define("serialization");
+  s3 = stage::define("db");
+  // ... start threads
+}
+
+void thread::request_handler(database db, net::conn c) {
+  thread::current()->stagestack = new sched::stage_stack();
+  buf b = c.recv();
+  req req = sql::parse(b);
+  response resp = db.handle_request(req);
+  buf b = sql::respond(resp);
+  c.send(b);
+  delete thread::current()->stagestack;
+}
+
+req sql::parse(buf& b) {
+  sched::stage_stack::guard sguard(thread::current()->stagestack,
+                                   s_ser);
+  // ... parsing ...
+}
+
+// adopt in all other functions ...
+
+\end{lstlisting}
+\caption{\lstinline[style=figurecpp]{sched::stage_stack} keeps previous stages in a stack.
+    The \lstinline[style=figurecpp]{sched::stage_stack::guard} constructor pushes the stage pointer onto the \lstinline[style=figurecpp]{stage_stack} and switches to the stage.
+    The corresponding destrucutor pops the current stage's pointer from the stack and switches back to the previous stage.}
+\end{figure}
+
 \section{Fast Thread Migration}\label{ch:di:mig}
 % Motivation: Stage switch requires migration to other core
 % Existing migration mechanism is based on IPIs, is too slow => results, maybe also compare to Linux => adjust hopper
