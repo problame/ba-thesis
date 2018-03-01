@@ -530,38 +530,47 @@ We conclude with a discussion of the limitations and trade-offs of our design in
 Where appropriate, we refer to the relevant commits in the Git repository of our modified version of OSv.
 
 \section{The OSv Library Operating System}\label{ch:di:osv}
-% what is osv, how does it work:
-%       libc + linux ABI => unmodified, existign software runs (mention ports), etc
-%       compact scheduler implementation => see below
-% why OSv for this thesis:
-%    small kernel / scheudler => implementation complexity
-%    virtual machines         => Linux scheduler for fairness goals, our OSv scheduler can focus on optimal stage-aware scheduling
-%
-% Design Deficiencies:
-%           While offloading almost all other design goals to Linux scheduler makes implementation considerably easier,
-%           it is by far not optimal: like all nested dynamic systems, the Linux scheduler and our scheduler can inadvertently work against each other
-%           => for simplicitly, we limit our design to a solution where cores are dedicated to the OSv VM
+We implement our stage-aware scheduling solution in the OSv \emph{library operating system}, which rethinks the traditional divide between the kernel and applications:
+Traditionally, an operating system provides abstracts from the physical hardware and multiplexes it among \emph{multiple} untrusting users and applications, providing protection and isolation at various levels.
+With the rise of hardware virtualization, it has become common practice to deploy a traditional OS running a \emph{single} application in a virtual machine running on top of a hypervisor.
+In this situation, both the hypervisor and the guest kernel implement protection mechanisms, but because each VM only runs a single app, the protection efforts made by the guest kernel are unnecessary. \todo{cite common practice}
 
-\begin{itemize}
-    \item Concept of a library OS: vm = app, no user-kernel-boundary => performance promise
-    \item Linux ABI-compat
-    \item Moderately sized C++ codebase, compact scheduler implementation
-\end{itemize}
-Idea: OSv allows for easier replacement of the entire scheduling policy and and thread migration mechanisms.
-By the nature of a library OS, the changes are kept application-local, leaving fairness considerations up to the hypervisor scheduler (Linux / KVM in our case).
+OSv addresses this situation by delegating all resource abstraction and protection responsibilities to the hypervisor.
+It confines itself to providing a familiar execution environment for a \emph{single trust domain}, providing facilities for multi-threading, scheduling, a network stack and filesystems.
+To run an application on OSv, it is bundled with the OSv kernel into a virtual machine image.
+When the VM starts, OSv establishes a \emph{single virtual address space} and dynamically links the application against its own C standard library, in which system calls are merely function calls into OSv routines.
+This technique allows dyanmically linked applications built on Linux to execute unmodified on OSv, unless they depend on facilities intentionally not provided by OSv such as forking new processes.
+The single trust domain property furthermore allows omitting all privilege level switching between OSv and the application.
+In summary, the removed user-kernel-boundary, syscall overhead and context \& privilege level switching improves application performance significantly without any application code changes required.
+However, if application developers choose to specifically target OSv, more efficient system APIs provide further optimization, e.g. zero-copy networking as opposed to the traditional socket API.~\cite{osvMain}
+
+While OSv incorporates pre-existing components for ACPI, the filesystem and originally the network stack, the core system is implemented in C++11.
+The codebase of ca. $400000$~lines of code is very small compared to the 20~million in Linux, % both code and comments
+% Linux: cloc . (v4.13)
+% OSv: cloc core include bsd arch fs drivers scripts linux.cc runtime.cc loader.cc Makefile (v0.24-470-gf9eedad4)
+which can be attributed to both the use of a more exprressive programming language and the comfort of only providing device drivers for typical hypversior-emulated devices and paravirtualization.
+The OSv scheduler in particular amounts to less than 3000 lines, making OSv particularly attractive for this thesis.%cloc core/sched.cc include/osv/sched.hh
+~\cite{osvMain}
 
 \subsection{The OSv Scheduler}
-This section highlights implementation details of the upstream OSv scheduler that are required to understand the framework in which our implementation was done.
-For details, we refer to the TODO paper.
-\begin{itemize}
-    \item runqueues + idle thread
-    \item thread pinning => percpu threads
-    \item thread migration mechanism
-    \item thread states => state diagram
-\end{itemize}
+The solution presented in this chapter must be implemented in the scheduler.
+To understand the design and implementation constraints we faces, this section gives a summary of the upstream OSv scheduler implementation.
 
-\section{User-Space API}\label{ch:di:api}
-% Define stages as objects in the kernel
+The OSv developers state that the \textquote{thread scheduler [\dots] should be lock-free, preemptive, tick-less, fair, scalable and efficient.}~\cite{osvMain}
+As such, it features CPU-local runqueues containing runnable threads, which are sorted ascendingly by the threads' recent average rumtimes.
+Load-balancing is implemented by a periodically-invoked per-core load-balancer thread that migrates threads from its runqueue to other cores if these are less loaded.
+
+OSv implements thread migration through a set of lock-free single-producer-single-consumer queues:
+given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per source CPU, containing pointers to the TCBs of the threads being migrated.
+At every reschedule, a CPU then drains all incoming queues into its runqueue.
+Each CPU is guaranteed to have an always runnable idle thread that spins for a short time and HALTs the CPU if no other runnable threads are in the runqueue.
+Thus, a source CPU may need to send an inter-processor-interrupts (IPIs) to the target CPU after enqueuing the migrated thread.
+For this purpose, each CPU has a bitmask, each bit representing one source CPU / wakup queue:
+The source CPU will atomically set its bit in the target CPU's bitmask and only send the IPI if the bit was not set before.
+This avoids flooding the target CPU with IPIs from different cores.
+
+\todo{mention that they could use mwait here? we need that in the evaluation}
+
 % User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
 % Stack structure for implementation comfort, describe idea behind stack structure & guards -> spans, like in web browser
 \blindtext
