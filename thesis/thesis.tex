@@ -459,23 +459,47 @@ Certain classes of datacenter applications exhibit large instruction working set
 On a micro-architectural level, this leads to underutilization of the cores' available computing resources, and thus worse application performance.
 This chapter presents our operating-system-based solution to mitigate this problem in multi-threaded servers which handle client connections in threads, each following the same, sequential, potentially blocking, code path.
 
-From an application developer's perspective, we provide a system API allowing to define \emph{stages} as objects and switch between them through function calls.
-Stages represent ideally disjoint instruction working sets, each fitting into the private cache of a CPU core.
-The application developer \emph{stagifies} their application by inserting stage switching calls into the request-handling code path, thus partitioning its total instruction working set into stages.
-For example, a request-handler will
-\begin{enumerate*}[label=(\alph*)]
+For example, in a database management system that is accessed over TCP, a request-handling thread will
+\begin{enumerate}[label=(\alph*)]
     \item read the request data from a socket, using the network stack, \label{en:di:ov:read}
     \item deserialze \& parse it, \label{en:di:ov:des}
     \item perform the requested operation,\label{en:di:ov:processing}
     \item serialize the response and \label{en:di:ov:ser}
     \item send it back to  the client. \label{en:di:ov:write}
-\end{enumerate*}
+\end{enumerate}
 While not true for all types of servers, database systems for example exhibit a a significant i-cache footprint in step~\ref{en:di:ov:processing} per high-level SQL operation (see Section~\ref{ch:relwork:steps}).
-In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
-Before calling \texttt{read} or \texttt{write} on the network socket, the developer would then switch to the network-stack-stage.
-It must be emphasized that stages do not form a pipeline: \ref{en:di:ov:read} and \ref{en:di:ov:write} form one stage because they share the network stack code, as do \ref{en:di:ov:des} and \ref{en:di:ov:ser} because they both use the serialization library.
+The code footprint of the network stack is also significant, as is the filesystem and potentially the serialization library.
 
-Given a stagified application, our solution then tracks per thread the association to its current stage in the TCB and per stage the number of threads currently associated with it.
+All these steps together will execute more code than fits in the private i-cache, leading to capacity i-cache misses when executed on a single core.
+Additionally, some code will be executed twice, but with another i-cache sized working set inbetween:
+For example, steps \ref{en:di:ov:read} and \ref{en:di:ov:write} share parts of the network stack but have steps \ref{en:di:ov:des}, \ref{en:di:ov:processing} and \ref{en:di:ov:ser} inbetween.
+Step \ref{en:di:ov:write} will thus likely incur i-cache misses for code that step \ref{en:di:ov:read} had brought into the cache at the beginning of the procedure.
+Furthermore, we must consider the situation where a request-handler thread $A$ blocks, for example on IO in steps \ref{en:di:ov:read}, \ref{en:di:ov:processing} or \ref{en:di:ov:write}:
+The scheduler will dispatch another request-handler $B$ on the same core, which may be in a different step than $A$.
+At worst, $B$ will evict all of $A$'s cache state.
+Looking at multi-core systems, the above behavior can be observed on each core because contemporary OS's schedulers balances threads based on load of the cores, not on cache state.
+
+We solve above problems on modern multi-core systems by implementing a suitable scheduling policy in the OS scheduler.
+\textbf{We define a \emph{stage} as a span in the request-handling code path that has an instruction footprint smaller than the private i-cache size.}
+Ideally, different stages' instruction and data working sets are fully disjoint.
+Given the example database system, one would define the following stages:
+$S_n$ for network stack, $S_{ser}$ for serialization and one per SQL operation ($S_{INS}$ for \texttt{\textsc{insert}}, $S_{SEL}$ for \texttt{\textsc{select}}, \dots).
+It is important to emphasize that stages do not necessarily form a pipeline:
+Reading from and writing to the network socket form one stage because these operations share the network stack code, as do request deserialization and response serialization because they both use the serialization library.
+\todo{well actually, ser and des may be quite disjoint, but it still works...}
+
+Once the stages are defined, a request-handler thread must switch to the appropriate stage before performing the next step of request-handling.
+In concrete terms, this means that developers must call a system API in the request-handling code path.
+In the example above, a \textit{\textsc{select}} request would result in the following switch series: $S_n$, $S_{ser}$, $S_{INS}$, $S_{ser}$, $S_n$.
+
+%%From an application developer's perspective, we provide a system API allowing to define \emph{stages} on program start and switch a thread as objects and to switch the current thread between them.
+%%Stages represent ideally disjoint instruction working sets, each fitting into the private cache of a CPU core.
+%%The application developer \emph{stagifies} their application by inserting stage switching calls into the request-handling code path, thus partitioning its total instruction working set into stages.
+%%
+%%In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
+%%Before calling \texttt{read} or \texttt{write} on the network socket, the developer would then switch to the network-stack-stage.
+
+Given such a \emph{stagified} application, we then track per thread the association to its current stage in the TCB and per stage the number of threads currently associated with it.
 We use this information to allocate CPU cores among the defined stages proportional to the stages' load.
 A core is thus always allocated to exactly one stage. % however, a stage may not have any dedicated cores. only tell that in the details section
 The scheduler then implements the following guiding principle: \textbf{A thread is only dispatched on cores that are allocated to the thread's current stage}.
