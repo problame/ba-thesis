@@ -571,7 +571,7 @@ As such, it features CPU-local runqueues containing runnable threads, which are 
 Load-balancing is implemented by a periodically-invoked per-core load-balancer thread that migrates threads from its runqueue to other cores if these are less loaded.
 
 OSv implements thread migration through a set of lock-free single-producer-single-consumer queues:
-given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per source CPU, containing pointers to the TCBs of the threads being migrated.
+Given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per source CPU, containing pointers to the TCBs of the threads being migrated.
 At every reschedule, a CPU then drains all incoming queues into its runqueue.
 Each CPU is guaranteed to have an always runnable idle thread that spins for a short time and HALTs the CPU if no other runnable threads are in the runqueue.
 Thus, a source CPU may need to send an inter-processor-interrupts (IPIs) to the target CPU after enqueuing the migrated thread.
@@ -588,7 +588,13 @@ This avoids flooding the target CPU with IPIs from different cores.
 Our scheduling policy spreads an application's working set over the private caches of all available CPU cores by scheduling a thread only on those cores that have its current stage's code in their private cache.
 We require developers to manually \emph{stagify} their applications by defining stages and inserting switchting calls into the request-handling code path.
 In order to facilitate adoption, the primary design goal for the stage API is thus to be as non-invasive as possible.
-Figure \ref{fig:di:api:exampleraw} gives an impression of how the stage API could be used in an existing application:
+
+We implement stages as a C++ class with public member functions allowing for definition and switching.
+For simplicitly, the definition API directly returns pointers to the stage objects, which is safe in OSv because kernel and application share a single trust domain and syscalls are merely function calls.
+In addition to the real implementation in OSv, we provide a no-op implementation of the stage interface as a shared library for Linux:
+Since applications for OSv are still built on the Linux host, this stub library enables us to build application binaries that work on both Linux and OSv.%
+\footnote{The OSv linker ignores missing libraries, and the app does not crash because the OSv implementation of the stage class provides the required functions}
+Figure \ref{fig:di:api:exampleraw} gives an impression of how the stage API could be used in an existing application.
 
 \begin{figure}[h]
 \begin{lstlisting}[style=figurecpp]
@@ -620,8 +626,9 @@ void request_handler(database db, net::conn c) {
 \label{fig:di:api:exampleraw}
 \end{figure}
 
-In addition to the direct switching calls, we provide a RAII-style data-structure reminiscent of the C++11 lock guards to switch to a stage for the lifetime of a block.
-This shifts the responsibility of switching stages from the function caller to the callee:
+In addition to the direct invocation of the switching API, we provide a RAII-style data-structure reminiscent of the C++11 lock guards to switch to a stage for the lifetime of a block and switch back to the previous stage when the guard object goes out of scope.
+This can be used to shift the responsibility of switching stages from the function caller to the callee, which is particularly useful when a piece of code is large enough to have its own stage but is called from more than one other stage.
+Figure \ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
 
 \begin{figure}[h]
 \begin{lstlisting}[style=figurecpp]
@@ -658,6 +665,7 @@ req sql::parse(buf& b) {
 \caption{\lstinline[style=figurecpp]{sched::stage_stack} keeps previous stages in a stack.
     The \lstinline[style=figurecpp]{sched::stage_stack::guard} constructor pushes the stage pointer onto the \lstinline[style=figurecpp]{stage_stack} and switches to the stage.
     The corresponding destrucutor pops the current stage's pointer from the stack and switches back to the previous stage.}
+\label{fig:di:api:exmaplestack}
 \end{figure}
 
 \section{Fast Thread Migration}\label{ch:di:mig}
