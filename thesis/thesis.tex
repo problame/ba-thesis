@@ -562,7 +562,7 @@ which can be attributed to both the use of a more exprressive programming langua
 The OSv scheduler in particular amounts to less than 3000 lines, making OSv particularly attractive for this thesis.%cloc core/sched.cc include/osv/sched.hh
 ~\cite{osvMain}
 
-\subsection{The OSv Scheduler}
+\subsection{The OSv Scheduler}\label{ch:di:osv:sched}
 The solution presented in this chapter must be implemented in the scheduler.
 To understand the design and implementation constraints we faces, this section gives a summary of the upstream OSv scheduler implementation.
 
@@ -578,8 +578,13 @@ Thus, a source CPU may need to send an inter-processor-interrupts (IPIs) to the 
 For this purpose, each CPU has a bitmask, each bit representing one source CPU / wakup queue:
 The source CPU will atomically set its bit in the target CPU's bitmask and only send the IPI if the bit was not set before.
 This avoids flooding the target CPU with IPIs from different cores.
-
 \todo{mention that they could use mwait here? we need that in the evaluation}
+
+Migrating runnable, but not currently running threads, is easy in this model: the source CPU removes the runnable thread from its runqueue and puts it into the incoming queue of the target CPU.
+However, thread may also migrate themselves to another CPU, while running, for example through the \lstinline[style=figurecpp]{pthread_set_affinity} API.
+In this case, the migrating thread spawns a short-lived helper thread and immediately schedules out.
+The helper thread will then put the migrating thread's TCB into the correct \lstiline[style=figurecpp]{incoming_wakeup} queue.
+\todo{mention they also had thread migration of running remote threads }
 
 
 \section{The Stage API: The Application Developer's Perspective}\label{ch:di:api}
@@ -691,7 +696,56 @@ req sql::parse(buf& b) {
 %              switch the state of the thread from stagemig_run to stagemig_sto
 %           => target CPU only dequeues those threads that are in stagemig_sto to its runqueue, others are still executing code on the source CPU
 % => State diagram with changes made in this step
-\blindtext
+Once an application has been stagified by the application developer, our solution must act on the stage switching calls made during request handling.
+Specifically, we must find a core whose private caches contain the switched-to stage's code and migrate the calling thread to that core.
+We defer discussion of the core allocation policy to Section~\ref{ch:di:pol} and focus on the migration mechanism in this chapter.
+
+We start with a short requirements analysis:
+On systems with less runnable threads than available CPUs, the time saved due to always-warm caches must be higher than the time spent on thread migration.
+We can reasonably expect that the shared LLC contains all application code, \todo{can we?} thus thread migration must be as faster than the time spent evicting and fillin the private cache with the entire request-handling code path from the shared LLC.
+If the number of runnable threads exceeds the available hardware threads, the speed of thread migration becomes less important because the target CPU already performs useful work.
+The source CPU however should not be spending significant time on the migration because it will also have useful work in its runqueue.
+And naturally, the thread migration should be minimally disruptive to the target CPU's cache and execution state.
+
+Upstream OSv's thread migration mechanism uses inter-processor interrupts (IPIs) to notify the target CPU about incoming migrations.
+IPIs take at least X $\mus$ on contemporary Intel CPUs, and the hardware virtualization required by OSv implies additional overhead.
+On the target CPU, the interrupt handler induces cache misses and pipeline flushes \todo{not correct? i mean that the pipeline can be dumped because of the irq handler}
+Additionally, migrations due to stage switches always happen from the running thread: Upstream OSv will thus spawn short-lived helper threads for every stage migration, which requires memory allocation and an invocation of the scheduler.
+
+We decide that both IPIs and helper threads have too much overhead to be used for stage switching.
+Therefore, we implement a faster, less disruptive but more painful alternative:
+Per CPU, we add a lock-free multi-producer-single-consumer (mpsc) queue called \lstinline[style=figurecpp]{stagesched_incoming} that exclusively contains pointers to the TCBs of threads that were migrated to that CPU.
+%The lock-free queue is implemented as an intrusive data structure and the list head kept in the CPU structure is a single pointer.
+When a thread calls the stage switching API, the core allocation policy returns a target CPU and the thread puts a pointer to its TCB into the target CPU's \lstinline[style=figurecpp]{stagesched_incoming} queue.
+It then sets the bit corresponding to the source CPU in the same bitasmk used by the upstream thread migration mechanism.
+Finally, it schedules out.
+The target CPU puts dequeued TCBs from the mpsc queue into its runqueue, thus completing the migration analogous to the upstream thread migration mechanism.
+However, the above overview omits two important details.
+
+At first, there is a race condition between the point where a migrating thread $T$ puts its TCB pointer into the \lstinline[style=figurecpp]{stagesched_incoming} queue and the point at which it schedules out:
+If the target CPU dequeues $T$'s TCB before $T$ has scheduled out, the TCB will not contain the correct register state.
+The target CPU will however happily enqueue $T$ into its runqueue, which may lead to the hazardous situation where both source and target CPU execute $T$ concurrently.
+The reader may rest assured that this was a rather delicate issue to debug.
+We solve this issue by defining the stage-switching-induced thread migration as a \emph{two-step operation} and represent these steps explicitly:
+Before the migrating threads puts its TCB into the target CPU's \lstinline[style=figurecpp]{stagesched_incoming} queue, it sets its state to \lstinline[style=figurecpp]{stagemig_run}.
+The target CPU however will put a migrating threads in that state back into the incoming queue because it assumes the migration is in fact not yet finished.
+We then perform the transition to the second \lstinline[style=figurecpp]{statemig_sto} state \emph{after} the migrating thread has scheduled out directly in the thread switching routine.
+Eventually, the target CPU will dequeue the thread in state \lstinline[style=figurecpp]{stagemig_sto} again and put it into its runqueue, thereby completing the migration.
+The procedure described above is visualized and Figure~\ref{fig:di:mig:race}
+
+\begin{figure}[h]
+    \missingfigure{visualize how we solve the the race condition}
+    \caption{Thread migration is a two-step operation, represented by two thread states: The target CPU must not put the migrating thread into its runqueue while that thread still finishes scheduling out on the source CPU.}
+    \label{fig:di:mig:race}
+\end{figure}
+
+The second issue we face with our migration mechanism is that the idle thread puts CPUs to sleep using the \textsc{\texttt{halt}} instruction.
+In upstream OSv, this is acceptable because all thread migrations use IPIs which will wake the CPU up.
+However, our thread migration mechanism does not use IPIs because they are too slow.
+While we will show in Chapter~\ref{ch:eval} \todo{check on that} that busy-waiting delivers even better performance, we find that the
+\textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions add a tolerable delay in exchange for possible power savings.
+We use \textsc{\texttt{monitor}} to arm the hardware on changes to the address of the incoming migrations bitmask and then use \textsc{\texttt{mwait}} to make the CPU wait for changes to the bitmask.
+
 \section{Work Conservation}\label{ch:di:wake}
 % Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
 %             when a thread is woken up, it will be enqueued inot the runqueue of the CPU where it went to sleep
