@@ -1,0 +1,35 @@
+digraph {
+
+    // Notation:
+    // - if no '::' in label, label refers to a member of class thread;
+    // - events occurs asynchronous to thread execution: style=dashed
+
+//    unstarted -> waiting [label="start(), followed by wake()"]
+//    unstarted -> prestarted [label="start(), before scheduler startup"]
+//
+//    prestarted -> unstarted [label="scheduler startup, followed by start()"]
+
+    queued
+    running
+    waiting
+    sending_lock
+    waking
+
+    waiting -> waking [label="wake()",style=dashed]
+    waiting -> running [label="condition true\nbefore reschedule"]
+    waiting -> sending_lock [label="unlocker starts\nreleasing mutex",style=dashed]
+
+    sending_lock -> waking [label="unlocker finishes\nreleasing mutex",style=dashed]
+
+    running -> waiting [label="start waiting\nfor condition"]
+    running -> queued [label="schedule out"]
+//    running -> terminating [label="thread main function returns"]
+
+    queued -> running [label="dequeue\nfrom runqueue"]
+
+    waking -> queued [label="dequeue from\nincoming_wakups\nin idle thread,\nenqueue to runqueue",style=dashed]
+    waking -> running [label="thread woken up\nbefore reschedule"]
+
+//    terminating -> terminated [label="terminating thread schedules out"]
+
+}

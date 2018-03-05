@@ -1,0 +1,38 @@
+digraph {
+
+       // Notation:
+       // - if no '::' in label, label refers to a member of class thread;
+       // - events occurs asynchronous to thread execution: style=dashed
+
+//    unstarted           -> prestarted            [label="start (before sched::init)"]
+//    prestarted          -> unstarted             [label="sched::init"]
+  
+//    unstarted           -> waiting_run           [label="start"];
+  
+
+    running             -> waiting_run           [label="start waiting\nfor condition"]
+    running             -> queued                [label="reschedule"]
+    queued              -> running               [label="reschedule"]
+//    running             -> terminating           [label="complete"]
+//    terminating         -> terminated            [lamel="schedule & complete"]
+  
+    waiting_run         -> sending_lock_run      [label="unlocker starts\nreleasing mutex",style=dashed]
+    waiting_run         -> waking_run            [label="wake"];
+    waiting_run         -> waiting_sto           [label="reschedule"]
+    sending_lock_run    -> waking_run            [label="unlocker finishes\nreleasing mutex",style=dashed]
+    sending_lock_run    -> sending_lock_sto      [label="reschedule"]
+  
+    waking_run          -> running               [label="dequeue from\nincoming_wakeups"]
+    waking_run          -> waking_sto            [label="reschedule"]
+  
+    waiting_sto         -> sending_lock_sto      [label="unlocker starts\nreleasing mutex",style=dashed]
+    waiting_sto         -> waking_sto            [label="wake",style=dashed]
+    sending_lock_sto    -> waking_sto            [label="unlocker finishes\nreleasing mutex",style=dashed]
+    waking_sto          -> queued                [label="dequeue from\nincoming_wakeups",style=dashed]
+  
+  
+//    running             -> stagemig_run                     [label="stage::enqueue"]
+//    stagemig_run        -> stagemig_sto          [label="switch_to"]
+//    stagemig_sto        -> queued                [label="stage::dequeue"]
+
+}
