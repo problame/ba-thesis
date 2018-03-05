@@ -717,22 +717,22 @@ req sql::parse(buf& b) {
 % => State diagram with changes made in this step
 Once an application has been stagified by the application developer, our solution must act on the stage switching calls made during request handling.
 Specifically, we must find a core whose private caches contain the switched-to stage's code and migrate the calling thread to that core.
-We defer discussion of the core allocation policy to Section~\ref{ch:di:pol} and focus on the migration mechanism in this chapter.
+We defer discussion of the core allocation policy to Section~\ref{ch:di:pol} and focus on the migration mechanism for now.
 
 We start with a short requirements analysis:
 On systems with less runnable threads than available CPUs, the time saved due to always-warm caches must be higher than the time spent on thread migration.
-We can reasonably expect that the shared LLC contains all application code, \todo{can we?} thus thread migration must be as faster than the time spent evicting and fillin the private cache with the entire request-handling code path from the shared LLC.
-If the number of runnable threads exceeds the available hardware threads, the speed of thread migration becomes less important because the target CPU already performs useful work.
+We can reasonably expect that the shared LLC contains all application code, \todo{can we? proof?} thus thread migration must be as faster than the time spent evicting and filling the private cache with the entire request-handling code path from the shared LLC.
+If the number of runnable threads exceeds the number of available hardware threads, the speed of thread migration becomes less important because the target CPU will have runnable threads to perform useful work.
 The source CPU however should not be spending significant time on the migration because it will also have useful work in its runqueue.
-And naturally, the thread migration should be minimally disruptive to the target CPU's cache and execution state.
+And naturally, the thread migration should be minimally disruptive to both CPUs' cache and execution state.
 
 Upstream OSv's thread migration mechanism uses inter-processor interrupts (IPIs) to notify the target CPU about incoming migrations.
-IPIs take at least X $\mus$ on contemporary Intel CPUs, and the hardware virtualization required by OSv implies additional overhead.
+IPIs take at least X $\mu s$ on contemporary Intel CPUs, and the hardware virtualization required by OSv introduces additional overhead.
 On the target CPU, the interrupt handler induces cache misses and pipeline flushes \todo{not correct? i mean that the pipeline can be dumped because of the irq handler}
-Additionally, migrations due to stage switches always happen from the running thread: Upstream OSv will thus spawn short-lived helper threads for every stage migration, which requires memory allocation and an invocation of the scheduler.
+Additionally, we must consider that stage switches are synchronous to the switching thread, which means that stage-switching based on OSv's thread migration mechanism would spawn a helper thread at every stage switch, thus requiring memory allocation and an additional invocation of the scheduler.
 
 We decide that both IPIs and helper threads have too much overhead to be used for stage switching.
-Therefore, we implement a faster, less disruptive but more painful alternative:
+Therefore, we implement a faster, less disruptive alternative:
 Per CPU, we add a lock-free multi-producer-single-consumer (mpsc) queue called \lstinline[style=figurecpp]{stagesched_incoming} that exclusively contains pointers to the TCBs of threads that were migrated to that CPU.
 %The lock-free queue is implemented as an intrusive data structure and the list head kept in the CPU structure is a single pointer.
 When a thread calls the stage switching API, we first find a CPU that has the target stage's code in its private caches.
@@ -740,6 +740,13 @@ Subsequently, we suspend the calling thread's timers and put a pointer to its TC
 Then, we set the bit corresponding to the source CPU in the same bitmask on the target CPU that is also used by the upstream thread migration mechanism.
 Finally, we call the scheduler to schedule out the migrating thread.
 The target CPU in turn dequeues TCBs from the mpsc queue into its runqueue, thus completing the migration analogous to the upstream thread migration mechanism.
+The above procedure is visualized in Figure~\ref{fig:di:mig:basic}.
+
+\begin{figure}[H]
+    \missingfigure[figheight=10cm]{visualize the stage-switching thread migration mechanism. multi-state graphic.}
+    \caption{The basic thread-migration mechanism used for stage-switching.}
+    \label{fig:di:mig:basic}
+\end{figure}
 
 While the above paragraph gives a good overview of our mechanism, we omitted two important details:
 At first, there is a race condition between the point where a migrating thread $T$ puts its TCB pointer into the \lstinline[style=figurecpp]{stagesched_incoming} queue and the point at which it schedules out:
@@ -751,20 +758,21 @@ Before the migrating threads puts its TCB into the target CPU's \lstinline[style
 The target CPU however will put a migrating threads in that state back into the incoming queue because it assumes the migration is in fact not yet finished.
 We then perform the transition to the second \lstinline[style=figurecpp]{statemig_sto} state \emph{after} the migrating thread has scheduled out directly in the thread switching routine.
 Eventually, the target CPU will dequeue the thread in state \lstinline[style=figurecpp]{stagemig_sto} again and put it into its runqueue, thereby completing the migration.
-The procedure described above is visualized and Figure~\ref{fig:di:mig:race}
+The procedure described above is visualized and Figure~\ref{fig:di:mig:race}.
 
-\begin{figure}[h]
-    \missingfigure{visualize how we solve the the race condition}
+\begin{figure}[H]
+    \missingfigure[figheight=10cm]{visualize how we solve the the race condition. extend figure above}
     \caption{Thread migration is a two-step operation, represented by two thread states: The target CPU must not put the migrating thread into its runqueue while that thread still finishes scheduling out on the source CPU.}
     \label{fig:di:mig:race}
 \end{figure}
 
-The second issue we face with our migration mechanism is that the idle thread puts CPUs to sleep using the \textsc{\texttt{halt}} instruction.
+The last issue we face with our migration mechanism is that the idle thread puts CPUs to sleep using the \textsc{\texttt{halt}} instruction.
 In upstream OSv, this is acceptable because all thread migrations use IPIs which will wake the CPU up.
-However, our thread migration mechanism does not use IPIs because they are too slow.
-While we will show in Chapter~\ref{ch:eval} \todo{check on that} that busy-waiting delivers even better performance, we find that the
-\textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions add a tolerable delay in exchange for possible power savings.
-We use \textsc{\texttt{monitor}} to arm the hardware on changes to the address of the incoming migrations bitmask and then use \textsc{\texttt{mwait}} to make the CPU wait for changes to the bitmask.
+However, our thread migration mechanism does not use IPIs and we must thus prohibit CPUs from entering an infinite \textsc{\texttt{halt}} state.
+Our solution thus uses the \textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions to get notified about changes to the incoming migrations bitmask while keeping the idle core in a low-power state. \todo{dark silicon advantage over busy-waiting, put in eval / discussion?}
+The obvious alternative would be to busy-wait on incoming migrations in the idle thread.
+However, this would prohibit the core from entering a low-power state or switching to its sibling hyperthread.
+While hyperthreading-support in the core allocation policy is subject to future work, \todo{check this is in} the choice to use \textsc{\texttt{mwait}} is therefore a necessary step towards that goal.
 
 \section{Work Conservation}\label{ch:di:wake}
 % Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
