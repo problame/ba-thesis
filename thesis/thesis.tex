@@ -580,11 +580,30 @@ The source CPU will atomically set its bit in the target CPU's bitmask and only 
 This avoids flooding the target CPU with IPIs from different cores.
 \todo{mention that they could use mwait here? we need that in the evaluation}
 
-Migrating runnable, but not currently running threads, is easy in this model: the source CPU removes the runnable thread from its runqueue and puts it into the incoming queue of the target CPU.
+Migrating runnable, but not currently running threads, is easy in this model:
+the source CPU removes the runnable thread from its runqueue and puts it into the incoming queue of the target CPU.
 However, thread may also migrate themselves to another CPU, while running, for example through the \lstinline[style=figurecpp]{pthread_set_affinity} API.
-In this case, the migrating thread spawns a short-lived helper thread and immediately schedules out.
-The helper thread will then put the migrating thread's TCB into the correct \lstiline[style=figurecpp]{incoming_wakeup} queue.
+Let us call this case \emph{synchronous thread migration}:
+In OSv, the migrating thread spawns a short-lived helper thread and immediately schedules out.
+The helper thread will then put the migrating thread's TCB into the correct \lstinline[style=figurecpp]{incoming_wakeup} queue.
 \todo{mention they also had thread migration of running remote threads }
+
+One complication of the above procedure are timers:
+Apart from timers specific to a CPU, a thread can program timers as well, for example for use with \textsc{\texttt{sigalarm}}.
+OSv timers are implemented using the CPU-\emph{local} Advanced Programmable Interrupt Controller (LAPIC) for timer delivery:
+Per CPU, a list of active timers is kept, sorted ascending by their expiration time.
+The LAPIC timer is then always programmed to fire at the expiration time of the first timer in the list.
+In the timer interrupt handler, the expired timers are removed from the sorted list and the LAPIC timer is reprogrammed.
+Threads whose timer fired are then woken up that are subsequently woken up, i.e., marked as runnable and put into the CPU's ready queue.
+It is crucial to observe that the upstream OSv timer abstraction does not allow a thread to have timers set on multiple CPUs:
+All datastructures related to timer management are only protected by masking interrupts because they are only manipulated by the thread itself or from the timer interrupt context.
+For thread migration, this means that timers must be removed from the source CPU's timer list before enqueuing the thread into the target CPU's \lstinline[style=figurecpp]{incoming_wakeup} queue.
+On the target CPU, in addition to putting the timer into the its timer list, the LAPIC may need to be reprogrammed if any of the migrated timers' expiration dates is earlier than the previous head of the list.
+
+Finally, we take a look at upstream OSv's \emph{remote asynchronous thread migration}, i.e., the situation where a thread $T_i$ executing on CPU $C_1$ initiates the migration of a thread $T_m$ currently executing on a CPU $C_2$ to a CPU $C_3$.
+As outlined in the previous paragraph, $T_m$'s timers must be migrated, which can only be initiated from the source CPU itself.
+Upstream OSv only requires this feature for implementing \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} and uses a helper thread $T_h$ that chases $T_m$ until $T_h$ can successfuly mask all interrupts on the same CPU as $T_m$ and suspend $T_i$'s timers.
+The remaining steps are the same as in synchronous thread migration.
 
 
 \section{The Stage API: The Application Developer's Perspective}\label{ch:di:api}
@@ -716,12 +735,13 @@ We decide that both IPIs and helper threads have too much overhead to be used fo
 Therefore, we implement a faster, less disruptive but more painful alternative:
 Per CPU, we add a lock-free multi-producer-single-consumer (mpsc) queue called \lstinline[style=figurecpp]{stagesched_incoming} that exclusively contains pointers to the TCBs of threads that were migrated to that CPU.
 %The lock-free queue is implemented as an intrusive data structure and the list head kept in the CPU structure is a single pointer.
-When a thread calls the stage switching API, the core allocation policy returns a target CPU and the thread puts a pointer to its TCB into the target CPU's \lstinline[style=figurecpp]{stagesched_incoming} queue.
-It then sets the bit corresponding to the source CPU in the same bitasmk used by the upstream thread migration mechanism.
-Finally, it schedules out.
-The target CPU puts dequeued TCBs from the mpsc queue into its runqueue, thus completing the migration analogous to the upstream thread migration mechanism.
-However, the above overview omits two important details.
+When a thread calls the stage switching API, we first find a CPU that has the target stage's code in its private caches.
+Subsequently, we suspend the calling thread's timers and put a pointer to its TCB into the target CPU's \lstinline[style=figurecpp]{stagesched_incoming} queue.
+Then, we set the bit corresponding to the source CPU in the same bitmask on the target CPU that is also used by the upstream thread migration mechanism.
+Finally, we call the scheduler to schedule out the migrating thread.
+The target CPU in turn dequeues TCBs from the mpsc queue into its runqueue, thus completing the migration analogous to the upstream thread migration mechanism.
 
+While the above paragraph gives a good overview of our mechanism, we omitted two important details:
 At first, there is a race condition between the point where a migrating thread $T$ puts its TCB pointer into the \lstinline[style=figurecpp]{stagesched_incoming} queue and the point at which it schedules out:
 If the target CPU dequeues $T$'s TCB before $T$ has scheduled out, the TCB will not contain the correct register state.
 The target CPU will however happily enqueue $T$ into its runqueue, which may lead to the hazardous situation where both source and target CPU execute $T$ concurrently.
