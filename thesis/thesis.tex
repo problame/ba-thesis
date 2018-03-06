@@ -478,12 +478,13 @@ The remainder of this thesis presents our design as well as its implementation i
 \chapter{Design \& Implementation}\label{ch:di}
 Certain classes of datacenter applications exhibit large instruction working sets that do not fit into the private cache of commodity processors.
 On a micro-architectural level, this leads to underutilization of the cores' available computing resources, and thus worse application performance.
-This chapter presents our operating-system-based solution to mitigate this problem in multi-threaded servers which handle client connections in threads, each following the same, sequential, potentially blocking, code path.
+This chapter presents our operating-system-based solution to mitigate this problem in multi-threaded servers.
 
+Multi-threaded servers handle client connections in threads, each following the same, sequential, potentially blocking, code path.
 For example, in a database management system that is accessed over TCP, a request-handling thread will
 \begin{enumerate}[label=(\alph*)]
     \item read the request data from a socket, using the network stack, \label{en:di:ov:read}
-    \item deserialze \& parse it, \label{en:di:ov:des}
+    \item deserialize \& parse it, \label{en:di:ov:des}
     \item perform the requested operation,\label{en:di:ov:processing}
     \item serialize the response and \label{en:di:ov:ser}
     \item send it back to  the client. \label{en:di:ov:write}
@@ -495,13 +496,13 @@ All these steps together will execute more code than fits in the private i-cache
 Additionally, some code will be executed twice, but with another i-cache sized working set inbetween:
 For example, steps \ref{en:di:ov:read} and \ref{en:di:ov:write} share parts of the network stack but have steps \ref{en:di:ov:des}, \ref{en:di:ov:processing} and \ref{en:di:ov:ser} inbetween.
 Step \ref{en:di:ov:write} will thus likely incur i-cache misses for code that step \ref{en:di:ov:read} had brought into the cache at the beginning of the procedure.
-Furthermore, we must consider the situation where a request-handler thread $A$ blocks, for example on IO in steps \ref{en:di:ov:read}, \ref{en:di:ov:processing} or \ref{en:di:ov:write}:
+Furthermore, we must consider the situation where a request-handler thread $A$ blocks, for example on I/O in steps \ref{en:di:ov:read}, \ref{en:di:ov:processing} or \ref{en:di:ov:write}:
 The scheduler will dispatch another request-handler $B$ on the same core, which may be in a different step than $A$.
 At worst, $B$ will evict all of $A$'s cache state.
 Looking at multi-core systems, the above behavior can be observed on each core because contemporary OS's schedulers balances threads based on load of the cores, not on cache state.
 
 We solve above problems on modern multi-core systems by implementing a suitable scheduling policy in the OS scheduler.
-\textbf{We define a \emph{stage} as a span in the request-handling code path that has an instruction footprint smaller than the private i-cache size.}
+\textbf{We define a \emph{stage} as a span in the request-handling code path that has an instruction working set smaller than the private i-cache size.}
 Ideally, different stages' instruction and data working sets are fully disjoint.
 Given the example database system, one would define the following stages:
 $S_n$ for network stack, $S_{ser}$ for serialization and one per SQL operation ($S_{INS}$ for \texttt{\textsc{insert}}, $S_{SEL}$ for \texttt{\textsc{select}}, \dots).
@@ -554,7 +555,7 @@ Where appropriate, we refer to the relevant commits in the Git repository of our
 We implement our stage-aware scheduling solution in the OSv \emph{library operating system}, which rethinks the traditional divide between the kernel and applications:
 Traditionally, an operating system provides abstracts from the physical hardware and multiplexes it among \emph{multiple} untrusting users and applications, providing protection and isolation at various levels.
 With the rise of hardware virtualization, it has become common practice to deploy a traditional OS running a \emph{single} application in a virtual machine running on top of a hypervisor.
-In this situation, both the hypervisor and the guest kernel implement protection mechanisms, but because each VM only runs a single app, the protection efforts made by the guest kernel are unnecessary. \todo{cite common practice}
+In this situation, both the hypervisor and the guest kernel implement protection mechanisms, but because each VM only runs a single application, the protection efforts of the guest kernel may be considered duplicate.~\cite{mirageOS,osvMain}
 
 OSv addresses this situation by delegating all resource abstraction and protection responsibilities to the hypervisor.
 It confines itself to providing a familiar execution environment for a \emph{single trust domain}, providing facilities for multi-threading, scheduling, a network stack and filesystems.
@@ -569,13 +570,13 @@ While OSv incorporates pre-existing components for ACPI, the filesystem and orig
 The codebase of ca. $400000$~lines of code is very small compared to the 20~million in Linux, % both code and comments
 % Linux: cloc . (v4.13)
 % OSv: cloc core include bsd arch fs drivers scripts linux.cc runtime.cc loader.cc Makefile (v0.24-470-gf9eedad4)
-which can be attributed to both the use of a more exprressive programming language and the comfort of only providing device drivers for typical hypversior-emulated devices and paravirtualization.
+which can be attributed to both the use of a more expressive programming language and the comfort of only providing device drivers for typical hypversior-emulated devices and paravirtualization.
 The OSv scheduler in particular amounts to less than 3000 lines, making OSv particularly attractive for this thesis.%cloc core/sched.cc include/osv/sched.hh
 ~\cite{osvMain}
 
 \subsection{The OSv Scheduler}\label{ch:di:osv:sched}
 The solution presented in this chapter must be implemented in the scheduler.
-To understand the design and implementation constraints we faces, this section gives a summary of the upstream OSv scheduler implementation.
+To understand the design and implementation constraints we faced, this section gives a summary of the upstream OSv scheduler implementation.
 
 The OSv developers state that the \textquote{thread scheduler [\dots] should be lock-free, preemptive, tick-less, fair, scalable and efficient.}~\cite{osvMain}
 As such, it features CPU-local runqueues containing runnable threads, which are sorted ascendingly by the threads' recent average rumtimes.
@@ -585,7 +586,7 @@ OSv implements thread migration through a set of lock-free single-producer-singl
 Given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per source CPU, containing pointers to the TCBs of the threads being migrated.
 At every reschedule, a CPU then drains all incoming queues into its runqueue.
 Each CPU is guaranteed to have an always runnable idle thread that spins for a short time and HALTs the CPU if no other runnable threads are in the runqueue.
-Thus, a source CPU may need to send an inter-processor-interrupts (IPIs) to the target CPU after enqueuing the migrated thread.
+Thus, a source CPU may need to send an inter-processor-interrupt (IPIs) to the target CPU after enqueuing the migrated thread.
 For this purpose, each CPU has a bitmask, each bit representing one source CPU / wakup queue:
 The source CPU will atomically set its bit in the target CPU's bitmask and only send the IPI if the bit was not set before.
 This avoids flooding the target CPU with IPIs from different cores.
@@ -593,7 +594,7 @@ This avoids flooding the target CPU with IPIs from different cores.
 
 Migrating runnable, but not currently running threads, is easy in this model:
 the source CPU removes the runnable thread from its runqueue and puts it into the incoming queue of the target CPU.
-However, thread may also migrate themselves to another CPU, while running, for example through the \lstinline[style=figurecpp]{pthread_set_affinity} API.
+However, threads may also migrate themselves to another CPU while still running, for example through the \lstinline[style=figurecpp]{pthread_set_affinity} API.
 Let us call this case \emph{synchronous thread migration}:
 In OSv, the migrating thread spawns a short-lived helper thread and immediately schedules out.
 The helper thread will then put the migrating thread's TCB into the correct \lstinline[style=figurecpp]{incoming_wakeup} queue.
@@ -602,16 +603,16 @@ The helper thread will then put the migrating thread's TCB into the correct \lst
 One complication of the above procedure are timers:
 Apart from timers specific to a CPU, a thread can program timers as well, for example for use with \textsc{\texttt{sigalarm}}.
 OSv timers are implemented using the CPU-\emph{local} Advanced Programmable Interrupt Controller (LAPIC) for timer delivery:
-Per CPU, a list of active timers is kept, sorted ascending by their expiration time.
+Per CPU, a list of active timers is kept, sorted ascendingly by their expiration time.
 The LAPIC timer is then always programmed to fire at the expiration time of the first timer in the list.
 In the timer interrupt handler, the expired timers are removed from the sorted list and the LAPIC timer is reprogrammed.
-Threads whose timer fired are then woken up that are subsequently woken up, i.e., marked as runnable and put into the CPU's ready queue.
+Threads whose timer fired are then woken, i.e., marked as runnable and put into the CPU's ready queue.
 It is crucial to observe that the upstream OSv timer abstraction does not allow a thread to have timers set on multiple CPUs:
 All datastructures related to timer management are only protected by masking interrupts because they are only manipulated by the thread itself or from the timer interrupt context.
 For thread migration, this means that timers must be removed from the source CPU's timer list before enqueuing the thread into the target CPU's \lstinline[style=figurecpp]{incoming_wakeup} queue.
 On the target CPU, in addition to putting the timer into the its timer list, the LAPIC may need to be reprogrammed if any of the migrated timers' expiration dates is earlier than the previous head of the list.
 
-Finally, we take a look at upstream OSv's \emph{remote asynchronous thread migration}, i.e., the situation where a thread $T_i$ executing on CPU $C_1$ initiates the migration of a thread $T_m$ currently executing on a CPU $C_2$ to a CPU $C_3$.
+In addition to synchronous thread migration upstream OSv also supports \emph{remote asynchronous thread migration}, i.e., the situation where a thread $T_i$ executing on CPU $C_1$ initiates the migration of a thread $T_m$ currently executing on a CPU $C_2$ to a CPU $C_3$.
 As outlined in the previous paragraph, $T_m$'s timers must be migrated, which can only be initiated from the source CPU itself.
 Upstream OSv only requires this feature for implementing \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} and uses a helper thread $T_h$ that chases $T_m$ until $T_h$ can successfuly mask all interrupts on the same CPU as $T_m$ and suspend $T_i$'s timers.
 The remaining steps are the same as in synchronous thread migration.
@@ -620,18 +621,20 @@ The remaining steps are the same as in synchronous thread migration.
 \section{The Stage API: The Application Developer's Perspective}\label{ch:di:api}
 % User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
 % Stack structure for implementation comfort, describe idea behind stack structure & guards -> spans, like in web browser
-Our scheduling policy spreads an application's working set over the private caches of all available CPU cores by scheduling a thread only on those cores that have its current stage's code in their private cache.
+Our scheduling policy spreads an application's working set over the private caches of all available CPU cores by scheduling threads only on those cores that have its current stage's code in their private cache.
 We require developers to manually \emph{stagify} their applications by defining stages and inserting switchting calls into the request-handling code path.
-In order to facilitate adoption, the primary design goal for the stage API is thus to be as non-invasive as possible.
+In order to facilitate adoption, our primary design goal for the stage API is thus to be non-invasive, allowing maintenance of private patches to an existing open source code base.
 
-We implement stages as a C++ class with public member functions allowing for definition and switching.
-For simplicitly, the definition API directly returns pointers to the stage objects, which is safe in OSv because kernel and application share a single trust domain and syscalls are merely function calls.
-In addition to the real implementation in OSv, we provide a no-op implementation of the stage interface as a shared library for Linux:
-Since applications for OSv are still built on the Linux host, this stub library enables us to build application binaries that work on both Linux and OSv.%
-\footnote{The OSv linker ignores missing libraries, and the app does not crash because the OSv implementation of the stage class provides the required functions}
+In OSv, we implement stages as a C++ class with public member functions for stage definition and switching.
+Since kernel and application share a single trust domain, we can simply export the same header to applications.
+A stagified application will thus receive pointers to the kernel objects representing changes and invoke methods on them.
+However, applications for OSv must be built on the Linux host where the stage API header and implementation is not available.
+To avoid build and linker failures, we provide a no-op implementation of the API as a shared library.
+This enables us to build application binaries that work on both Linux and OSv using the application provided build system.%
+\footnote{The OSv linker ignores missing libraries, and the app does not crash because the OSv implementation of the stage class provides the required functions.}
 Figure \ref{fig:di:api:exampleraw} gives an impression of how the stage API could be used in an existing application.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \begin{lstlisting}[style=figurecpp]
 #include <osv/stagesched.h>
 
@@ -661,11 +664,11 @@ void request_handler(database db, net::conn c) {
 \label{fig:di:api:exampleraw}
 \end{figure}
 
-In addition to the direct invocation of the switching API, we provide a RAII-style data-structure reminiscent of the C++11 lock guards to switch to a stage for the lifetime of a block and switch back to the previous stage when the guard object goes out of scope.
+In addition to the direct invocation of the switching API, we provide a RAII-style data-structure reminiscent of C++11 lock guards to switch to a stage for the lifetime of a block and switch back to the previous stage when the guard object goes out of scope.
 This can be used to shift the responsibility of switching stages from the function caller to the callee, which is particularly useful when a piece of code is large enough to have its own stage but is called from more than one other stage.
-Figure \ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
+Figure~\ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
 
-\begin{figure}[h]
+\begin{figure}[H]
 \begin{lstlisting}[style=figurecpp]
 #include <osv/stagesched.h>
 
@@ -700,7 +703,7 @@ req sql::parse(buf& b) {
 \caption{\lstinline[style=figurecpp]{sched::stage_stack} keeps previous stages in a stack.
     The \lstinline[style=figurecpp]{sched::stage_stack::guard} constructor pushes the stage pointer onto the \lstinline[style=figurecpp]{stage_stack} and switches to the stage.
     The corresponding destrucutor pops the current stage's pointer from the stack and switches back to the previous stage.}
-\label{fig:di:api:exmaplestack}
+\label{fig:di:api:examplestack}
 \end{figure}
 
 \section{Fast Thread Migration}\label{ch:di:mig}
@@ -734,11 +737,11 @@ We start with a short requirements analysis:
 On systems with less runnable threads than available CPUs, the time saved due to always-warm caches must be higher than the time spent on thread migration.
 We can reasonably expect that the shared LLC contains all application code, \todo{can we? proof?} thus thread migration must be as faster than the time spent evicting and filling the private cache with the entire request-handling code path from the shared LLC.
 If the number of runnable threads exceeds the number of available hardware threads, the speed of thread migration becomes less important because the target CPU will have runnable threads to perform useful work.
-The source CPU however should not be spending significant time on the migration because it will also have useful work in its runqueue.
-And naturally, the thread migration should be minimally disruptive to both CPUs' cache and execution state.
+The source CPU, however, should not be spending significant time on the migration because it will also have useful work in its runqueue.
+Lastly, the thread migration should be minimally disruptive to both CPUs' cache and execution state.
 
 Upstream OSv's thread migration mechanism uses inter-processor interrupts (IPIs) to notify the target CPU about incoming migrations.
-IPIs take at least X $\mu s$ on contemporary Intel CPUs, and the hardware virtualization required by OSv introduces additional overhead.
+IPIs take at least X $\mu s$ on contemporary Intel CPUs, and the hardware virtualization required by OSv introduces additional overhead.~\todo{data}
 On the target CPU, the interrupt handler induces cache misses and pipeline flushes \todo{not correct? i mean that the pipeline can be dumped because of the irq handler}
 Additionally, we must consider that stage switches are synchronous to the switching thread, which means that stage-switching based on OSv's thread migration mechanism would spawn a helper thread at every stage switch, thus requiring memory allocation and an additional invocation of the scheduler.
 
@@ -750,7 +753,7 @@ When a thread calls the stage switching API, we first find a CPU that has the ta
 Subsequently, we suspend the calling thread's timers and put a pointer to its TCB into the target CPU's \lstinline[style=figurecpp]{stagesched_incoming} queue.
 Then, we set the bit corresponding to the source CPU in the same bitmask on the target CPU that is also used by the upstream thread migration mechanism.
 Finally, we call the scheduler to schedule out the migrating thread.
-The target CPU in turn dequeues TCBs from the mpsc queue into its runqueue, thus completing the migration analogous to the upstream thread migration mechanism.
+The target CPU in turn dequeues TCBs from the mpsc queue into its runqueue at reschedule and in the idle thread, thus completing the migration analogous to the upstream thread migration mechanism.
 The above procedure is visualized in Figure~\ref{fig:di:mig:basic}.
 
 \begin{figure}[H]
@@ -762,13 +765,13 @@ The above procedure is visualized in Figure~\ref{fig:di:mig:basic}.
 While the above paragraph gives a good overview of our mechanism, we omitted two important details:
 At first, there is a race condition between the point where a migrating thread $T$ puts its TCB pointer into the \lstinline[style=figurecpp]{stagesched_incoming} queue and the point at which it schedules out:
 If the target CPU dequeues $T$'s TCB before $T$ has scheduled out, the TCB will not contain the correct register state.
-The target CPU will however happily enqueue $T$ into its runqueue, which may lead to the hazardous situation where both source and target CPU execute $T$ concurrently.
+The target CPU will however enqueue $T$ into its runqueue, which may lead to the hazardous situation where both source and target CPU execute $T$ concurrently.
 The reader may rest assured that this was a rather delicate issue to debug.
-We solve this issue by defining the stage-switching-induced thread migration as a \emph{two-step operation} and represent these steps explicitly:
+We solve this problem by defining the stage-switching-induced thread migration as a \emph{two-step operation} and represent these steps explicitly:
 Before the migrating threads puts its TCB into the target CPU's \lstinline[style=figurecpp]{stagesched_incoming} queue, it sets its state to \lstinline[style=figurecpp]{stagemig_run}.
-The target CPU however will put a migrating threads in that state back into the incoming queue because it assumes the migration is in fact not yet finished.
-We then perform the transition to the second \lstinline[style=figurecpp]{statemig_sto} state \emph{after} the migrating thread has scheduled out directly in the thread switching routine.
-Eventually, the target CPU will dequeue the thread in state \lstinline[style=figurecpp]{stagemig_sto} again and put it into its runqueue, thereby completing the migration.
+The target CPU's dequeing routine will put a threads in that state back into the mpsc queue because it the migration is not yet finished.
+We then perform the transition to the second \lstinline[style=figurecpp]{statemig_sto} state \emph{after} the migrating thread has really stopped executing on the source CPU by extending the context switching code with inline-assembly that is guaranteed to not touch the stack.
+Eventually, the target CPU will dequeue the thread, observe that it is in state \lstinline[style=figurecpp]{stagemig_sto} and put it into its runqueue, thereby completing the migration.
 The procedure described above is visualized and Figure~\ref{fig:di:mig:race}.
 
 \begin{figure}[H]
@@ -780,10 +783,10 @@ The procedure described above is visualized and Figure~\ref{fig:di:mig:race}.
 The last issue we face with our migration mechanism is that the idle thread puts CPUs to sleep using the \textsc{\texttt{halt}} instruction.
 In upstream OSv, this is acceptable because all thread migrations use IPIs which will wake the CPU up.
 However, our thread migration mechanism does not use IPIs and we must thus prohibit CPUs from entering an infinite \textsc{\texttt{halt}} state.
-Our solution thus uses the \textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions to get notified about changes to the incoming migrations bitmask while keeping the idle core in a low-power state. \todo{dark silicon advantage over busy-waiting, put in eval / discussion?}
+Our solution uses the \textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions to get notified about changes to the incoming migrations bitmask while keeping the idle core in a low-power state. \todo{dark silicon advantage over busy-waiting, put in eval / discussion?}
 The obvious alternative would be to busy-wait on incoming migrations in the idle thread.
 However, this would prohibit the core from entering a low-power state or switching to its sibling hyperthread.
-While hyperthreading-support in the core allocation policy is subject to future work, \todo{check this is in} the choice to use \textsc{\texttt{mwait}} is therefore a necessary step towards that goal.
+While hyperthreading-support in the core allocation policy is subject to future work, \todo{check this is in future work} using \textsc{\texttt{mwait}} is a necessary step towards that goal.
 
 
 \section{Work Conservation on Multi-Core Systems}\label{ch:di:wake}
@@ -807,10 +810,10 @@ While hyperthreading-support in the core allocation policy is subject to future 
 In Chapter~\ref{ch:analysis}, we analyzed that the proof-of-concept implementation in Linux at the KIT OS group is not work conserving:
 It only allows thread migration to be initiated from user-space and thus prohibits migrating threads to idle cores at the time the thread unblocks.
 In contrast, our solution models stages explicitly and tracks a thread's association with its current stage in the thread's TCB.
-Utilizing all cores in of a multi-core system is thus trivial in theory:
-When a blocked thread is woken up, we simply find a CPU that has that thread's current stage in its cache and enqueue the woken-up thread's TCB into that CPU's runqueue.
+Utilizing all cores of a multi-core system is thus trivial in theory:
+When a blocked thread is woken up, we find a CPU that has that thread's current stage's code in its cache and enqueue the woken-up thread's TCB into that CPU's runqueue.
 
-However, in practice, this beautiful, simple concept is crushed by the realities of the OSv scheduler implementation.
+However, in practice, this beautiful concept is crushed by the realities of the OSv scheduler implementation.
 Let us first look at wakeup-related state transitions that a thread may go through in upstream OSv:
 
 \begin{figure}[H]
@@ -821,18 +824,18 @@ Let us first look at wakeup-related state transitions that a thread may go throu
     \label{fig:di:wake:upstreamstates}
 \end{figure}
 
-The most relevant observation in Figure~\ref{fig:di:wake:upstreamstates} is that the upstream OSv thread states do not encode whether the thread has finished scheduling out.
+The key observation in Figure~\ref{fig:di:wake:upstreamstates} is that the upstream OSv thread states do not encode whether the thread has finished scheduling out.
 In fact, only threads in state \textit{queued} are guaranteed to be stopped and only threads in state \textit{running} are guaranteed to be running.
 The remaining triad of \textit{waiting}, \textit{sending\_lock} and \textit{waking} is ambiguous in that regard:
-In each of these states, the thread can either have completed scheduling out or it can still be in the midst of doing this.
-In the latter case, it may even observe that it has already been woken up again and move itself from \textit{waking} back to \textit{running}.
+In each of these states, the thread can either have completed scheduling out or it can still be on the way to do that.
+In the latter case, the thread may even observe that it has already been woken up again by some other thread and move itself from \textit{waking} back to \textit{running}.
 
 Upstream OSv can live with this ambiguous state representation because it never migrates threads on wake.
 In our solution however, we want to do exactly that.
 Why do we need to know so precisely whether the woken-up thread has finished scheduling out or not?
-If the thread is still running, we cannot migrate it from the context of the asynchronous waker and we do not want to migrate it because its current CPU still has a hot cache.
-If however the thread has stopped running, we want to migrate it to a less loaded core assigned to the same stage in order to be work conserving.
-And in contrast to a running thread, a stopped thread can be migrated using OSv's built-in incoming wakeup queues as described in Section~\ref{ch:di:osv}.
+If the thread is still running, we do not want to migrate it because its current CPU still has a hot cache.
+If the thread was however actualy stopped, we want to migrate it to a less loaded core assigned to the same stage in order to fully utilize available CPU resources.
+And in contrast to a thread that is still running, we can use a more efficient implementation of remote asynchronous thread migration that works without a chasing helper thread.
 
 The first pillar of our work-conserving scheduler implementation is therefore a significant refactoring of the OSv thread states:
 As we already did with the \textit{stagemig\_run} and \textit{stagemig\_sto} states in Section~\ref{ch:di:mig},
@@ -850,13 +853,18 @@ The resulting thread state transitions are depicted in Figure~\ref{fig:di:wake:s
     \label{fig:di:wake:spreadstates}
 \end{figure}
 
-With the refactoring of the thread states done, there still remains one obstacle for performing migration of woken-up threads in the context of the waker:
-As explained in Section~\ref{ch:di:osv:sched}, upstream OSv provides a facility for \emph{remote asynchronous thread migration} which is implemented using a short-lived helper thread to suspend the timers of the to-be-migrated thread.
-The helper thread is necessary because the OSv's timer abstraction mandates that a thread's timers be all local to a single core.
-Looking at the version control history of upstream OSv, the timer implementation predates support for remote asynchronous thread migration, leading us to believe that the helper thread was added as an afterthought.
-Given that upstream only required it for the POSIX \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} API, this is a very understandable and a quite elegant engineering trade-off.
+With the refactoring of the thread states done, we can now discuss our faster alternative for remote asynchronous thread migration.
+Let us recall from Section~\ref{ch:di:osv:sched} that
+\begin{enumerate}[label=(\alph*)]
+    \item the waker may run on another CPU than the woken-up thread,
+    \item upstream OSv requires threads to have all their timers on one CPU core and
+    \item upstream OSv's remote asynchronous thread migration relies on a short-lived helper thread chasing the to-be-migrated thread until it effectively performs synchronous thread migration.
+\end{enumerate}
+The helper thread is necessary because of the timer implementation's requirement to keep all of a thread's timers on a single core.
+Looking at the version control history of upstream OSv, the timer implementation predates support for remote asynchronous thread migration.
+Given that upstream only required it for the POSIX \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} API, we assume that the helper-thread-based solution was considered good enough --- in fact it is a quite elegant engineering trade-off.
 However, our solution requires remote asynchronous thread migration to be \emph{fast}.
-Thus, we do neither want to pay the price of spawning a helper thread nor do we want to incur the cost of a remote function call from waker to source CPU to reprogram the its LAPIC-based timer.
+Thus, we neither want to pay the price of spawning a helper thread nor do we want to incur the cost of a remote function call from waker to source CPU to reprogram the its LAPIC-based timer.
 Let us therefore reconsider the minimal requirements to make remote asynchronous migration work:
 We need a waker $T_w$ on CPU $C_1$ be able to migrate a stopped thread $T_s$ from a remote source CPU $C_2$ to a remote destination CPU $C_3$. $T_w$ must
 \begin{enumerate}
@@ -864,8 +872,8 @@ We need a waker $T_w$ on CPU $C_1$ be able to migrate a stopped thread $T_s$ fro
     \item put $T_s$'s TCB into the incoming migrations queue of $C_3$ that corresponds to CPU $C_1$ and \todo{check if we actually do this correctly}
     \item set the corresponding bit in $C_3$'s incoming migrations bitmask.
 \end{enumerate}
-We observe that the timers in step 1 only need to be \emph{removed} remotely--- resuming them on CPU $C_3$ is the job of its CPU-local idle thread.
-We recall that the CPU-local timer lists are sorted ascending by expiration date and that the underlying hardware timer is programmed to the expiration date closest in the future.
+We observe that the timers in step 1 only need to be \emph{removed} remotely and that \emph{resuming} them on CPU $C_3$ is the job of the CPU-local dequeue operation.
+We recall that the CPU-local timer lists are sorted ascendingly by expiration date and that the underlying hardware timer is programmed to the expiration date closest in the future.
 However, it is not a problem if the hardware timer fires and the corresponding timer object is no longer in the list:
 The implementation will simply re-program the hardware timer to the closest timer in the future, i.e. the list head timer's expiration date.
 Our solution for remotely suspending timers exploits this property:
@@ -873,7 +881,7 @@ We protect each CPU's timer list with a recursive spinlock and extend the timer 
 The waker can then follow the steps described above.
 While the source CPU will incur a spurious timer interrupt, we fully avoid all overhead associated with the original helper thread.
 
-After the above refactorings, we finally have an efficient way to perform remote asynchronous thread migration in the waker, making our scheduler work conserving
+After these substantial refactorings, we finally have an efficient way to perform remote asynchronous thread migration in the context of the waker and thus immediately dispatch a woken thread on a suitable CPU core chosen by the core allocation policy.
 
 \section{Core Allocation Policy}\label{ch:di:pol}
 % remove load balancing + fairness (cpu time, priority queue / sorted list? )
@@ -905,7 +913,7 @@ After the above refactorings, we finally have an efficient way to perform remote
 
 %              => analogy of requests to be handled = water in pipes...?
 %              => a CPU will still have threads from the previous stage in the runqueue: doesn't matter because...
-%                    ...they will be migrated off this CPU as soon as they schedule out / block on IO
+%                    ...they will be migrated off this CPU as soon as they schedule out / block on I/O
 %                    ...round robin ensures the caches are warm for the remaining threads in the old stage
 %                    ... we know the requests will finish processing eventually
 
@@ -918,18 +926,20 @@ After the above refactorings, we finally have an efficient way to perform remote
 %               track c_in per stage in atomic counters
 %               ... see patch, fairly boring
 %               max_stages, snapshot runqueue counters 
-With the Stage API and both synchronous and remote asynchronous thread migration mechanisms in place, we will now present the core allocation policy.
-Remember that the basic idea of our solution is to dedicate CPU cores and hence their private caches to stages, and only dispatch threads onto those cores that are assigned to the thread's current stage.
-However, in order to fully utilize the available CPU cores, we cannot assume this assignment to be fixed:
-A thread may spend a different amount of time per stage, either because their code has different, fixed runtime or because its runtime is dependent on request parameters.
-Therefore, the core allocation must be periodically re-asssessed, and the system must support a changing core allocation efficiently.
+The aspects of the implementation discussed so far are the mechanisms of our solution.
+This section presents the core allocation policy, which is consumed by both synchronous stage-switching and the work-conserving wakeup mechanism.
+
+%Recall that the basic idea of our solution is to dedicate CPU cores and hence their private caches to stages, and only dispatch threads onto those cores that are assigned to the thread's current stage.
+%However, in order to fully utilize the available CPU cores, we cannot assume this assignment to be fixed:
+%Each thread may thread may spend a different amount of time per stage, either because the stages' code has different fixed runtimes or because their runtime depends on request parameters.
+%Therefore, the core allocation policy must be periodically re-asssessed, and the system must support a changing core allocation efficiently.
 
 The basic concept of our allocation policy is simple:
 \textbf{We define \emph{stage load} as the number of \emph{runnable} threads in a given stage and dedicate CPU cores to stages proportional to their load.}
-After computing a core allocation, we use it for a configurable amount of time \todo {code or revert to reality} to select a target CPUs on stage switch and wake-ups.
+After computing a core allocation, we use it for a configurable amount of time \todo {code or revert to reality} to select a target CPU on stage switch and wake-ups (see Section~\ref{ch:di:mig} and \ref{ch:di:wake}).
 If a stage has been assigned multiple CPUs, the CPU with the shortest runqueue is chosen.
 Each CPU schedules its runqueue using non-preemptive round robin. \todo{evaluation / discussion}
-After an assignment's maximum age has been reached, we compute a new assignment using new stage load values.
+After an assignment's maximum age has been reached, we compute a new assignment using the then up-to-date stage load distribution.
 It is crucial to observe that this setup creates a \textbf{feedback-loop}:
 The number of cores available to a stage increases the CPU time available to its runnable threads, which in turn reduces the stages load.
 The above strategy thus evens out load differences between stages and CPU cores. \todo{why desirable? queuing theory?}
@@ -940,39 +950,40 @@ The above strategy thus evens out load differences between stages and CPU cores.
 \end{figure}
 
 For a more detailed description of the implementation, let us first summarize the requirements of the rest of the system:
-When a thread synchronously switches stages, we need to find a target CPU that is assigned to the switched-to stage.
+When a thread synchronously switches stages, we need to find a target CPU that is assigned to the target stage.
 When waking up a stopped thread, we need to find a CPU that is assigned to that thread's current stage.
-While stage switches may be relatively infrequent throughout the handling of a single request, that is not true for wakeups, for example because the request handler performs blocking IO.
+While stage switches may be relatively infrequent throughout the handling of a single request, that is not true for wakeups, for example because the request handler performs blocking I/O.
 Consulting the core allocation should therefore be fast.
-Additionally, all cores will use the same core allocation concurrently, but our design also involves periodic updating.
+Additionally, all cores use the same core allocation concurrently, but at the same time, our design also involves periodic updating of the assignment.
 The update mechanism must therefore be designed to allow all cores to make progress during an update.
-Lastly, an update should be minimal in the number of coures that switch to another stage in order to minimize the sum of capacity misses incured due to the upgrade.
+Lastly, an update should be minimal in the number of cores that switch to another stage, in order to minimize the sum of capacity misses incured due to the update.
 
 Our implementation is based around the \emph{assignment} data structure which represents a concrete mapping of CPU cores to stages, and the \emph{requirement vector}, which only specifies the number of cores to be assigned to each stage.
-On a system with $C$ cores and $S$ stages, a requirement is a vector ${r = \begin{smallmatrix}( r_1 & r_2 & \dots & r_S )\end{smallmatrix}}$ where ${r_i \in \mathbb{N}_0$ and $\sum_{i = 1}^{S} r_i  = C}$.
-An assignment ${a = \begin{smallmatrix}( a_1 & a_2 & \dots & a_C )\end{smallmatrix}}$ then maps all $C$ cores to stages, under the constraint ${\forall s \in 1 \dots S : \vert\{\left i : a_i = s \right \} \vert = r_s}$.
-When computing a new assignment $a'$, our goal must then be to minimize ${\vert\{\left i : a_i' \ne a_i \right\}\vert}$ because this is the number of cores that will incur capacity i-cache misses due to the core switching to a new stage.
+On a system with $C$ cores and $S$ stages, a requirement is a vector
 
-The initial assignment in the system distributes the available cores using simple modulo arithmetic.
-The periodic update then consists of the following two steps:
-At first, we compute a new requirement vector $r'$ that distributes CPUs proportional to the stage load.
-Afterwards, we compute a new new assignment from the existing assignment and $r'$.
+    \[ r = \begin{pmatrix} r_1 & r_2 & \dots & r_S \end{pmatrix} \left\text{where}\right r_i \in \mathbb{N}_0 \left \text{and} \right \sum_{i = 1}^{S} r_i  = C \]
 
-We compute the new $r'$ as follows:
+A valid assignment derived from $r$ then maps each of the $C$ cores to exactly one stage.
+
+    \[ a_{r} = \begin{pmatrix} a_1 & a_2 & \dots & a_C \end{pmatrix} \wedge \forall s \in 1 \dots S : \vert\{\left i : a_i = s \right \} \vert = r_s \]
+
+When requirements change to $r'$ and we need to update the assignment to $a_{r'}'$, our goal must then be to minimize ${\vert\{\left i : a_i' \ne a_i \right\}\vert}$ because this is the number of cores that will incur capacity i-cache misses due to the core switching to a new stage.
+
+We compute the requirements vector periodically using the following algorithm:
 Given the current stage load ${l = \begin{smallmatrix}( l_1 & l_2 & \dots & l_C )\end{smallmatrix}}$, we normalize this vector to $\hat{l}$ such that ${\sum_{i = 1}^{S} \hat{l}_i = 1.0}$.
 We then use ${p = \hat{l}}$ as the initial \emph{priority vector} to distribute $C$ CPU cores among the stages:
 At first, we compute ${f = p * C}$, representing the floating-point quantity of CPUs per stage.
 However, we can only assign integer-quantities of CPUs.
 Therefore, we let ${r' \mathrel{+}= \floor{f}}$ and start a new iteration of the loop using ${p = norm(f - \floor{f})}$ and ${C = C - \sum_{i = 1}^{S} \floor{f}_i}$.
-If ${\floor{f} = \begin{smallmatrix}( 0 & 0 & \dots & 0 )\end{smallmatrix}}$, we shift priorities in $p$ from lowest to highest-priority stage such that after at most $C$ iterations, all CPUs are distributed.
+If ${\floor{f} = \begin{smallmatrix}( 0 & 0 & \dots & 0 )\end{smallmatrix}}$, we shift priorities in $p$ from lowest to highest-priority stage such that after at most $C$ iterations, all CPUs are distributed.~\todo{pseudocode?}
 
-The minimal transition is then implemented by building a delta vector ${\Delta r = r' - r}$:
+The minimal transition from $a_r$ to $a_{r'}'$ is then implemented by building a delta vector ${\Delta r = r' - r}$:
 Negative comonents represent stages with excess cores whereas positive components represent need for cores.
 A simple nested loop then re-assigns cores between components of $\Delta r$ and updates the assignment accordingly.
 Note that the constraints on requirement and assignment vectors imply that ${\sum_{i = 1}^{S} \Delta r_i = 0}$, guaranteeing that a full transfer is always possible.
 The asymptotic runtime complexity of loop is in $O(S^2)$, but since we do not expect more than ten stages per application, this is neglegible for this thesis.
 
-We use RCU for concurrent use and update of the assignment:
+The last problem to solve is the concurrent use and update of the assignment, for which we use OSv's version of read-copy-update~\cite{readCopyUpdate} (RCU):
 When accessing the current assignment through its public getter, we compare the timestamp of the assignment's creation against the current time. \todo{code or revert to reality}
 If the maximum age is exceeded and there is no other thread already computing a new assignment, the calling thread becomes the updater.
 RCU allows all other threads to safely use the old assignment until the new one has been computed.
