@@ -45,7 +45,8 @@
   language=C++,
   basicstyle=\footnotesize,
   frame=single,
-  xleftmargin=\parindent
+  xleftmargin=\parindent,
+  alsodigit={:},
 }
 
 \begin{document}
@@ -567,10 +568,10 @@ In summary, the removed user-kernel-boundary, syscall overhead and context \& pr
 However, if application developers choose to specifically target OSv, more efficient system APIs provide further optimization, e.g. zero-copy networking as opposed to the traditional socket API.~\cite{osvMain}
 
 While OSv incorporates pre-existing components for ACPI, the filesystem and originally the network stack, the core system is implemented in C++11.
-The codebase of ca. $400000$~lines of code is very small compared to the 20~million in Linux, % both code and comments
+The codebase of ca. $400000$~lines of code is very small compared to the 20~million lines of Linux 4.13, % both code and comments
 % Linux: cloc . (v4.13)
 % OSv: cloc core include bsd arch fs drivers scripts linux.cc runtime.cc loader.cc Makefile (v0.24-470-gf9eedad4)
-which can be attributed to both the use of a more expressive programming language and the comfort of only providing device drivers for typical hypversior-emulated devices and paravirtualization.
+which can be attributed to both the use of a more expressive programming language and the comfort of only providing device drivers for typical hypervisor-emulated devices and paravirtualization.
 The OSv scheduler in particular amounts to less than 3000 lines, making OSv particularly attractive for this thesis.%cloc core/sched.cc include/osv/sched.hh
 ~\cite{osvMain}
 
@@ -578,9 +579,9 @@ The OSv scheduler in particular amounts to less than 3000 lines, making OSv part
 The solution presented in this chapter must be implemented in the scheduler.
 To understand the design and implementation constraints we faced, this section gives a summary of the upstream OSv scheduler implementation.
 
-The OSv developers state that the \textquote{thread scheduler [\dots] should be lock-free, preemptive, tick-less, fair, scalable and efficient.}~\cite{osvMain}
+The OSv developers state that the \textquote{thread scheduler [\dots] should be lock-free, preemptive, tick-less, fair, scalable and efficient.}
 As such, it features CPU-local runqueues containing runnable threads, which are sorted ascendingly by the threads' recent average rumtimes.
-Load-balancing is implemented by a periodically-invoked per-core load-balancer thread that migrates threads from its runqueue to other cores if these are less loaded.
+Load-balancing is implemented by a periodically-invoked per-core load-balancer thread that migrates threads from its runqueue to other cores if these are less loaded.~\cite{osvMain}
 
 OSv implements thread migration through a set of lock-free single-producer-single-consumer queues:
 Given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per source CPU, containing pointers to the TCBs of the threads being migrated.
@@ -589,7 +590,7 @@ Each CPU is guaranteed to have an always runnable idle thread that spins for a s
 Thus, a source CPU may need to send an inter-processor-interrupt (IPIs) to the target CPU after enqueuing the migrated thread.
 For this purpose, each CPU has a bitmask, each bit representing one source CPU / wakup queue:
 The source CPU will atomically set its bit in the target CPU's bitmask and only send the IPI if the bit was not set before.
-This avoids flooding the target CPU with IPIs from different cores.
+This avoids flooding the target CPU with IPIs from different cores.~\cite{osvGit,osvMain}
 \todo{mention that they could use mwait here? we need that in the evaluation}
 
 Migrating runnable, but not currently running threads, is easy in this model:
@@ -597,54 +598,53 @@ the source CPU removes the runnable thread from its runqueue and puts it into th
 However, threads may also migrate themselves to another CPU while still running, for example through the \lstinline[style=figurecpp]{pthread_set_affinity} API.
 Let us call this case \emph{synchronous thread migration}:
 In OSv, the migrating thread spawns a short-lived helper thread and immediately schedules out.
-The helper thread will then put the migrating thread's TCB into the correct \lstinline[style=figurecpp]{incoming_wakeup} queue.
+The helper thread will then put the migrating thread's TCB into the correct \lstinline[style=figurecpp]{incoming_wakeup} queue.~\cite{osvGit}
 \todo{mention they also had thread migration of running remote threads }
 
 One complication of the above procedure are timers:
 Apart from timers specific to a CPU, a thread can program timers as well, for example for use with \textsc{\texttt{sigalarm}}.
-OSv timers are implemented using the CPU-\emph{local} Advanced Programmable Interrupt Controller (LAPIC) for timer delivery:
+OSv timers are implemented using the CPU-local Advanced Programmable Interrupt Controller (LAPIC) for timer delivery:
 Per CPU, a list of active timers is kept, sorted ascendingly by their expiration time.
 The LAPIC timer is then always programmed to fire at the expiration time of the first timer in the list.
 In the timer interrupt handler, the expired timers are removed from the sorted list and the LAPIC timer is reprogrammed.
 Threads whose timer fired are then woken, i.e., marked as runnable and put into the CPU's ready queue.
 It is crucial to observe that the upstream OSv timer abstraction does not allow a thread to have timers set on multiple CPUs:
-All datastructures related to timer management are only protected by masking interrupts because they are only manipulated by the thread itself or from the timer interrupt context.
+All data structures related to timer management are only protected by masking interrupts because they are only manipulated by the thread itself or from the timer interrupt context.
 For thread migration, this means that timers must be removed from the source CPU's timer list before enqueuing the thread into the target CPU's \lstinline[style=figurecpp]{incoming_wakeup} queue.
-On the target CPU, in addition to putting the timer into the its timer list, the LAPIC may need to be reprogrammed if any of the migrated timers' expiration dates is earlier than the previous head of the list.
+On the target CPU, after adding the migrated timers to its timer list, the LAPIC may need to be reprogrammed if any of the migrated timers' expiration dates are earlier than the previous head of the list.~\cite{osvGit}
 
 In addition to synchronous thread migration upstream OSv also supports \emph{remote asynchronous thread migration}, i.e., the situation where a thread $T_i$ executing on CPU $C_1$ initiates the migration of a thread $T_m$ currently executing on a CPU $C_2$ to a CPU $C_3$.
 As outlined in the previous paragraph, $T_m$'s timers must be migrated, which can only be initiated from the source CPU itself.
 Upstream OSv only requires this feature for implementing \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} and uses a helper thread $T_h$ that chases $T_m$ until $T_h$ can successfuly mask all interrupts on the same CPU as $T_m$ and suspend $T_i$'s timers.
-The remaining steps are the same as in synchronous thread migration.
+The remaining steps are the same as in synchronous thread migration.~\cite{osvGit}
 
 
-\section{The Stage API: The Application Developer's Perspective}\label{ch:di:api}
+\section{The Stage API}\label{ch:di:api}
 % User-space can enqueue itself to a stage, will be migrated to one of the cores it is assigned to
 % Stack structure for implementation comfort, describe idea behind stack structure & guards -> spans, like in web browser
 Our scheduling policy spreads an application's working set over the private caches of all available CPU cores by scheduling threads only on those cores that have its current stage's code in their private cache.
-We require developers to manually \emph{stagify} their applications by defining stages and inserting switchting calls into the request-handling code path.
+We require developers to manually \emph{stagify} their applications by defining stages and inserting switching calls into the request-handling code path.
 In order to facilitate adoption, our primary design goal for the stage API is thus to be non-invasive, allowing maintenance of private patches to an existing open source code base.
 
 In OSv, we implement stages as a C++ class with public member functions for stage definition and switching.
 Since kernel and application share a single trust domain, we can simply export the same header to applications.
 A stagified application will thus receive pointers to the kernel objects representing changes and invoke methods on them.
 However, applications for OSv must be built on the Linux host where the stage API header and implementation is not available.
-To avoid build and linker failures, we provide a no-op implementation of the API as a shared library.
-This enables us to build application binaries that work on both Linux and OSv using the application provided build system.%
+To avoid build and linker failures, we provide a no-op implementation of the API as a shared library, enabling us to produce application binaries that work on both Linux and OSv.%
 \footnote{The OSv linker ignores missing libraries, and the app does not crash because the OSv implementation of the stage class provides the required functions.}
 Figure \ref{fig:di:api:exampleraw} gives an impression of how the stage API could be used in an existing application.
 
 \begin{figure}[H]
-\begin{lstlisting}[style=figurecpp]
+\begin{lstlisting}[style=figurecpp,morekeywords={stage,stage::define,enqueue}]
 #include <osv/stagesched.h>
 
-sched::stage *s_net, *s_ser, *s_db;
+stage *s_net, *s_ser, *s_db;
 
 int main() {
-  s1 = stage::define("net");
-  s2 = stage::define("serialization");
-  s3 = stage::define("db");
-  // ... start threads
+  s_net = stage::define("net");
+  s_ser = stage::define("serialization");
+  s_db = stage::define("db");
+  // start threads ...
 }
 
 void request_handler(database db, net::conn c) {
@@ -669,39 +669,40 @@ This can be used to shift the responsibility of switching stages from the functi
 Figure~\ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
 
 \begin{figure}[H]
-\begin{lstlisting}[style=figurecpp]
+\begin{lstlisting}[style=figurecpp,morekeywords={stage_stack,stage,stage::define,stage_stack::guard}]
 #include <osv/stagesched.h>
 
-sched::stage *s_net, *s_ser, *s_db;
+class thread {
+    stage_stack stagestack;
+    ...
+};
+
+stage *s_net, *s_ser, *s_db;
 
 int main() {
-  s1 = stage::define("net");
-  s2 = stage::define("serialization");
-  s3 = stage::define("db");
-  // ... start threads
+  s_net = stage::define("net");
+  s_ser = stage::define("serialization");
+  s_db = stage::define("db");
+  // start threads ...
 }
 
 void thread::request_handler(database db, net::conn c) {
-  thread::current()->stagestack = new sched::stage_stack();
   buf b = c.recv();
-  req req = sql::parse(b);
-  response resp = db.handle_request(req);
-  buf b = sql::respond(resp);
+  req rq = sql::parse(b);
+  response rs = db.handle_request(rq);
+  buf b = sql::respond(rs);
   c.send(b);
-  delete thread::current()->stagestack;
 }
 
+// Use stage_stack::guard in all functions
 req sql::parse(buf& b) {
-  sched::stage_stack::guard sguard(thread::current()->stagestack,
-                                   s_ser);
-  // ... parsing ...
+  stage_stack::guard g(thread::current()->stagestack, s_ser);
+  ...
 }
-
-// adopt in all other functions ...
 
 \end{lstlisting}
-\caption{\lstinline[style=figurecpp]{sched::stage_stack} keeps previous stages in a stack.
-    The \lstinline[style=figurecpp]{sched::stage_stack::guard} constructor pushes the stage pointer onto the \lstinline[style=figurecpp]{stage_stack} and switches to the stage.
+\caption{\lstinline[style=figurecpp]{stage_stack} keeps previous stages in a stack.
+    The \lstinline[style=figurecpp]{stage_stack::guard} constructor pushes the stage pointer onto the \lstinline[style=figurecpp]{stage_stack} and switches to the stage.
     The corresponding destrucutor pops the current stage's pointer from the stack and switches back to the previous stage.}
 \label{fig:di:api:examplestack}
 \end{figure}
@@ -789,7 +790,7 @@ However, this would prohibit the core from entering a low-power state or switchi
 While hyperthreading-support in the core allocation policy is subject to future work, \todo{check this is in future work} using \textsc{\texttt{mwait}} is a necessary step towards that goal.
 
 
-\section{Work Conservation on Multi-Core Systems}\label{ch:di:wake}
+\section{Thread Migration on Wake-Up}\label{ch:di:wake}
 % Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
 %             when a thread is woken up, it will be enqueued inot the runqueue of the CPU where it went to sleep
 %             if that CPU is already executing a thread but another one of the same stage is idle, we do not use the available resources efficiently
@@ -854,17 +855,19 @@ The resulting thread state transitions are depicted in Figure~\ref{fig:di:wake:s
 \end{figure}
 
 With the refactoring of the thread states done, we can now discuss our faster alternative for remote asynchronous thread migration.
-Let us recall from Section~\ref{ch:di:osv:sched} that
+Let us recall some details on upstream OSv from Section~\ref{ch:di:osv:sched}:
 \begin{enumerate}[label=(\alph*)]
-    \item the waker may run on another CPU than the woken-up thread,
-    \item upstream OSv requires threads to have all their timers on one CPU core and
-    \item upstream OSv's remote asynchronous thread migration relies on a short-lived helper thread chasing the to-be-migrated thread until it effectively performs synchronous thread migration.
+    \item The waker may run on another CPU than the woken-up thread.
+    \item The timer implementation requires all timers of a thread to be on one CPU.
+    \item Remote asynchronous thread migration relies on a short-lived helper thread that chases the to-be-migrated thread and eventually performs the same steps required for synchronous thread migration in the name of the to-be-migrated thread.
 \end{enumerate}
-The helper thread is necessary because of the timer implementation's requirement to keep all of a thread's timers on a single core.
-Looking at the version control history of upstream OSv, the timer implementation predates support for remote asynchronous thread migration.
-Given that upstream only required it for the POSIX \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} API, we assume that the helper-thread-based solution was considered good enough --- in fact it is a quite elegant engineering trade-off.
-However, our solution requires remote asynchronous thread migration to be \emph{fast}.
-Thus, we neither want to pay the price of spawning a helper thread nor do we want to incur the cost of a remote function call from waker to source CPU to reprogram the its LAPIC-based timer.
+The helper thread is necessary because the timer implementation only allows suspending timers on the core they would fire on.
+Looking at the version control history of upstream OSv, we see that remote asynchronous thread migration is greatly predated by timers.
+Furthermore, upstream only required it for the POSIX \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} API.
+Therefore, we assume that the helper-thread-based solution was considered good enough --- in fact it is a quite elegant engineering trade-off.
+However, we require remote asynchronous thread migration to be fast and thus do not want to pay the price of the helper thread.
+Also, we cannot afford a remote function call to reprogram the source CPU's LAPIC timer.
+
 Let us therefore reconsider the minimal requirements to make remote asynchronous migration work:
 We need a waker $T_w$ on CPU $C_1$ be able to migrate a stopped thread $T_s$ from a remote source CPU $C_2$ to a remote destination CPU $C_3$. $T_w$ must
 \begin{enumerate}
