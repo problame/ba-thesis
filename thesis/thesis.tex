@@ -1014,20 +1014,38 @@ We acknowledge that more recent runtimes with event-driven concurrency or M:N sc
 
 \chapter{Evaluation}\label{ch:eval}
 In Chapter~\ref{ch:di}, we presented our operating-system-based solution to mitigate the suboptimal cache behavior of multi-threaded server applications:
-We use fast thread migration mechanisms to spread the request handlers' instruction working set over all available private CPU caches and propose a corresponding work-conserving scheduling policy.
-In this chapter, we evaluate our design and implementation in top-down order 
-At first, we stagify MySQL, a widely-used open-source database management system, and measure its performance using an industry-standard benchmark, showing that our technique yields to X\% higher throughput compared to upstream OSv. \todo{data}
-To prove that our design is responsible for these performance gains, we validate our individual design assumptions using performance counters and micro-benchmarks.
+We provide a system API to define \emph{stages} which represent spans in the request-handling code path whose instruction working set is smaller than the size of a CPU core's private cache.
+The OS scheduling policy is aware of these stages and migrates threads to different cores when they switch stages using fast thread migration mechanisms.
+By dedicating CPU cores to stages, threads always execute code that is in the private cache, thus avoiding expensive off-core cache or memory accesses.
 
-The remainder of this chapter is structured as follows:
+In this chapter, we evaluate our implementation in the OSv library operating system to validate the following theses:
+\begin{enumerate}
+    \item Existing applications can adopt our solution with minimal changes required to the existing code.
+        We show this by documenting the adoption of the stage API in MySQL v5.8.
+    \item Our solution improves relevant performance metrics for these applications compared to upstream OSv and virtualized Linux.
+        We show this using industry-standard TPC-C benchmark.
+    \item Above performance improvements are due to the stage-aware scheduling technique presented in this thesis:
+    \begin{enumerate}
+        \item Our solution spreads an application's instruction working set over multiple cores.
+            We show this using the Top-Down performance analysis method and other performance-counter-based metrics.
+        \item Our fast thread migration mechanism and migration on wake-up are required for improving net application performance.
+            We show this by implementing the stage API in upstream OSv based on the upstream thread migration mechanisms and comparing performance of both sides using fixed core allocation.
+        \item Our core allocation policy allocates CPUs proportional to stage load.
+            We show this by instrumenting the corresponding code with OSv tracepoints.
+        \item Our core allocation policy improves application performance compared to fixed core allocation.
+            We show this using TPC-C using a varying the number of concurrent client connections. \todo{show better resource utilization?}
+    \end{enumerate}
+\end{enumerate}
+
+The remainder of this chapter is structured accordingly:
 Section~\ref{ch:eval:setup} describes the hard- and software setup common to all measurements presented in this thesis.
-We proceed with the stagification of MySQL 5.8 in Section~\ref{ch:eval:stageapi}, showing the small code footprint of the stage API in an existing legacy code base.
-In Section~\ref{ch:eval:perf} we then present the performance comparison of MySQL running on our solution and upstream OSv as well as virtualized and bare-metal Linux.
-Based on that data gathered during the benchmark, we show in Section~\ref{ch:eval:perfcache} that our technique has the expected effect on the cache behavior of MySQL.
-To isolate the advantage of spreading the application's instruction working set and work-conserving wake-ups from the noise introduced by dynamic core allocation,
-we repeat the same measurements using fixed core allocation in Section~\ref{ch:eval:fixed}.
-Furthermore, we use micro-benchmarks to measure the performance improvements of our versions of synchronous and remote asynchronous thread migration in Section~\ref{ch:eval:mig}.
-Finally, we use OSv tracepoints to examine our dynamic core allocation policy in Section~\ref{ch:eval:pol}.
+Subsequently, we show the adoption of the stage API in MySQL~v5.8 in Section~\ref{ch:eval:stageapi}.
+Section~\ref{ch:eval:perf} then presents the MySQL performance comparison using TPC-C.
+The remaining sections cover the validation of our design assumptions:
+In Section~\ref{ch:eval:perfcache}, we show that we successfully spread MySQL's instruction working set over multiple cores.
+We show the advantages of our thread migration mechanisms in Section~\ref{ch:eval:mig} isolated from the influence of the core allocation policy.
+The basic idea of allocating cores based on stage load is then validated separately in Section~\ref{ch:eval:polidea}.
+Finally, we show the performance improvements achieved by the allocation policy in Section~\ref{ch:eval:polperf}.
 
 \section{Evaluation Setup}\label{ch:eval:setup}
 % Intel(R) Xeon(R) CPU E5-2618L v3 @ 2.30GHz
@@ -1059,6 +1077,7 @@ Finally, we use OSv tracepoints to examine our dynamic core allocation policy in
 %         vm image always in ramdisk, linux should use zfs for fair comparison
 % discussion: likely metal linux will outperform all vm-based solutions. maybe experiment with network-card passthrough
 
+\section{Validation of Design Assumptions}
 
 \subsection{Cache Behavior}\label{ch:eval:perfcache}
 % compare our manually chosen points witht hose from mathias' simulation, same measurements as in microbenchmark above
@@ -1073,9 +1092,7 @@ Finally, we use OSv tracepoints to examine our dynamic core allocation policy in
 % mentio nwe run on ramdisk, does I/O actually block? how often? 
 % der steps graph (figure 7) sieht ziemlich aehnlich aus
 
-\section{Cache Behavior with Fixed Core Allocation}\label{ch:eval:fixed}
-
-\section{Thread Migration Mechanisms}\label{ch:eval:mig}
+\subsection{Thread Migration Mechanisms}\label{ch:eval:mig}
 % hypothesis: thread migration on Linux and upstream OSv is not faster than 9 - 14 us (ref sodaspr / compspr)
 %             our thread migration is as fast as the code path from enqueue to switch_to + memory latency / cache coherence protocol
 % method: microbenchmarks using std::clock* which uses high-res clock
@@ -1086,41 +1103,43 @@ Finally, we use OSv tracepoints to examine our dynamic core allocation policy in
 % result: is faster, we know that
 % interpretation: mwait costs approx 1us more than busy-waiting, linux 4.* is faster than 2.* because it uses monitor & mwait instead of IPIs on supported platforms
 
-\section{Dynamic Core Allocation Policy}\label{ch:eval:pol}
+\subsection{Core Allocation Proportional to Stage Load}\label{ch:eval:polidea}
 
-\subsection{It Steers Against CPU-bottlenecked Statges (bottleneck = CPU Time)}
-% hypothesis: if threads require more CPU time in a stage, our scheduler assigns more CPUs to that stage
-% method: OSv tracepoint for core allocation & post-process it
-%         microbenchmark, 3 stages, can control the distribution of load between stages:
-%         => each stage has a tight loop counting up integers. over all stages, we increment 2^32 times, a 3-tuple whose components add up to 1 controls which stage does how many increments
-%         then vary the 3-tuple over time, should be reflected in visualization below
-%         ! compare the cases where 3-tuple leads to clean distribution of cores (no remainders), try finding oscillating cases
-% visualization: stacked plot x-axis time, stages in fixed vertical order, height = number of CPUs, should be proportional to the current 3-tuple
-%                find a way to compare with ideal distribution (i.e. the 3-tuples), maybe just a second graph below it with synced x-axis?
-\subsection{CPU allocation is not influenced by blocked threads}
-% FIX THAT IN THE CODE, _c_in must track the numbe rof runnable threads per stage
-\subsection{Load is balanced between the cores of a stage}
-% = equal runqueue lenghts. difficult...
+\subsection{Dynamic Core Allocation Improves Application Performance}\label{ch:eval:polperf}
 
-%\section{Cache-Resident Instruction Working Set}
-% hypothesis: we can spread a thread's instruction working set over multiple cores (compspr with our thread migration technique),
-%             resulting in reduced I-cache misses (primarily L2), stall cycles and mispredicted branches
-% method: microbenchmarks + performance counters on the host (ithrash)
-%         chain of jmp instructions that randomly traverses memory (TODO maybe use sth other than std::shuffle?)
-%         each jmp touches a different cache line
-%         FIXME this will not show mispredicted branches as there is nothing to predict
-%         performance counters on the host with perf (configuration to capture events inside the VM):
-%           - l2_rqsts.code_rd_hit:ukhG l2 hits
-%           - l2_rqsts.code_rd_miss:ukhG, l2 misses
-%           - icache.hit:ukhG l1 hits
-%           - icache.misses:ukhG l1 misses
-%           TODO top down methodology / vTune?
-%        only measure our osv, related work has shown the technique works using other thread migration techniques already
-%        variation: per-stage working set size: in 8K steps, show that spreading over L1 is useless, expect knee of the curve at L2 size (or 1/2 because of conflict misses)
+%\subsection{It Steers Against CPU-bottlenecked Statges (bottleneck = CPU Time)}
+%% hypothesis: if threads require more CPU time in a stage, our scheduler assigns more CPUs to that stage
+%% method: OSv tracepoint for core allocation & post-process it
+%%         microbenchmark, 3 stages, can control the distribution of load between stages:
+%%         => each stage has a tight loop counting up integers. over all stages, we increment 2^32 times, a 3-tuple whose components add up to 1 controls which stage does how many increments
+%%         then vary the 3-tuple over time, should be reflected in visualization below
+%%         ! compare the cases where 3-tuple leads to clean distribution of cores (no remainders), try finding oscillating cases
+%% visualization: stacked plot x-axis time, stages in fixed vertical order, height = number of CPUs, should be proportional to the current 3-tuple
+%%                find a way to compare with ideal distribution (i.e. the 3-tuples), maybe just a second graph below it with synced x-axis?
+%\subsection{CPU allocation is not influenced by blocked threads}
+%% FIX THAT IN THE CODE, _c_in must track the numbe rof runnable threads per stage
+%\subsection{Load is balanced between the cores of a stage}
+%% = equal runqueue lenghts. difficult...
 %
-% visualization: groups of bars, x axis has per-core working set size
-% result: yes it works
-% interpretation: ?
+%%\section{Cache-Resident Instruction Working Set}
+%% hypothesis: we can spread a thread's instruction working set over multiple cores (compspr with our thread migration technique),
+%%             resulting in reduced I-cache misses (primarily L2), stall cycles and mispredicted branches
+%% method: microbenchmarks + performance counters on the host (ithrash)
+%%         chain of jmp instructions that randomly traverses memory (TODO maybe use sth other than std::shuffle?)
+%%         each jmp touches a different cache line
+%%         FIXME this will not show mispredicted branches as there is nothing to predict
+%%         performance counters on the host with perf (configuration to capture events inside the VM):
+%%           - l2_rqsts.code_rd_hit:ukhG l2 hits
+%%           - l2_rqsts.code_rd_miss:ukhG, l2 misses
+%%           - icache.hit:ukhG l1 hits
+%%           - icache.misses:ukhG l1 misses
+%%           TODO top down methodology / vTune?
+%%        only measure our osv, related work has shown the technique works using other thread migration techniques already
+%%        variation: per-stage working set size: in 8K steps, show that spreading over L1 is useless, expect knee of the curve at L2 size (or 1/2 because of conflict misses)
+%%
+%% visualization: groups of bars, x axis has per-core working set size
+%% result: yes it works
+%% interpretation: ?
 
 
 \chapter{Conclusion}\label{ch:concl}
