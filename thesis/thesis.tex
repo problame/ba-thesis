@@ -991,7 +991,18 @@ When accessing the current assignment through its public getter, we compare the 
 If the maximum age is exceeded and there is no other thread already computing a new assignment, the calling thread becomes the updater.
 RCU allows all other threads to safely use the old assignment until the new one has been computed.
 
-\section{Discussion}\label{ch:di:discuss}
+\section{Limitations \& Future Work}\label{ch:di:discuss}
+\blindtext
+% big picture
+%   multi-threaded server => limits to one concurrency model (that is mostly legacy / java apps?)
+%   manual placement of migration points: unpublished work at KIT OS group works on automating that workflow
+%   migration increases data misses, so i-cache hits + benefits must outweigh them => need apps with execution phase behvaior => mathias' papermigration points at locations misses thread mandatory thread
+% sched policy details
+%   non-preemptive round robin => server tasks are I/O intensive, will thus necessarily perform blocking I/O. we could implement preemptive to be safe, but we are pretty sure the timer would never fire 
+%   policy does not do smoothing in feedback-loop => if we had more time...
+%   core allocation does not work well on idle systems => could implement adaptive scheduler, out of scope for this thesis
+
+
 The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
 More elaborate discussion on design trade-offs is deferred to then end of this chapter and the evaluation.
 
@@ -1010,6 +1021,62 @@ our approach aims at reaping the benefits of staged computation in legacy applic
 Thread-pools and per-request threads were the dominant threading model in the last TODO years and are in fact still used in new applications today.
 We acknowledge that more recent runtimes with event-driven concurrency or M:N scheduling models are incompatible with our approach, unless programmers manually construct the supported threading models on top of them.\todo{proof}\todo{discussion section?}
 
+\subsection{OSv's Page Access Scanner}
+During the implementation of the core allocation policy we found that an OSv system thread called \emph{page access scanner} (PAS) consumes significant CPU time.
+It is unpinned (not per-cpu) and thus always executes on CPU0 in our solution because we removed the upstream scheduler's load balancing mechanism and only provide stage-aware scheduling to applications, not OSv system threads.
+
+Since the PAS is apparently the only unpinned system thread that consumes significant CPU time, we investigated it more closely:
+OSv's main filesystem is a port of the Zettabyte File System (ZFS) which includes its own Adaptive Replacement Cache (ARC).
+The OSv page cache uses the PAS thread to inform the ARC about recent usage of file-backed pages by checking and subsequently clearing the page table entries' accessed bits.
+The PAS consists of an infinite loop that self-tunes the CPU time it consumes through a target value $t \in [0.1 and 20]$:
+It scans pages for $t$\% and then sleeps for $1-t$\% of the time it runs, where $t$ depends on a decaying average of the page access rate.
+The loop runs at a hard-coded frequency of 1000Hz.
+While this value is respected in the formula to calculate the maximum time the PAS may run before going to sleep, changing it affects the effective amount of work done by the PAS:
+For example, when choosing 10 instead of 1000Hz as the PAS frequency, each invocation of the PAS can in theory run up to 100 times longer, but since the entire page cache may be scannable in a shorter time, putting the PAS back to sleep early.
+As a side-effect, a reduced frequency also lowers the temporal resolution of the page usage data available to the ARC.
+
+Our core allocation policy does not handle this situation well:
+We track stage load in the stage switching and the reschedule routines, not by summing up the length of a stage's cores' runqueues.
+Any load caused by system threads is thus invisible to our policy, which is generally acceptable because most system threads are per-cpu-threads and usually sleep.
+However, the PAS is an exception in this case because it executes only on CPU0 and is invisible in the stage load vector.
+Whenever the core allocation policy assign CPU0 to a stage, that stage's threads compete with the PAS for CPU-time.
+%Within a stage, we always enqueue a thread to the core with the shortest runqueue.
+%At a high-frequency of PAS invocations (1000Hz), highto a  core load-balance b
+Furthermore, the high frequency of PAS invocations (1000Hz) is detrimental to cache performance on CPU0:
+The PAS thread's instruction working set is disjoint from the stage threads' working set and given that the latter barely fits the CPU-private cache, the frequent scheduling of the PAS thread causes thrashing of that cache on CPU0.
+%At first, we must emphasize that the use of non-preemptive round-robin scheduling per CPU is not problematic because the PAS thread consistently sleeps after less than 500 $\mu s$ of execution.
+%However, a file-system intensive application like MySQL drives $t$ toward $20\%$ of targeted CPU time, thus leaving only 80\% of CPU 0's  time to the stage's threads.
+
+To demonstrate the effects described above, we run a single-terminal TPC-C benchmark againt stagified MySQL using our core allocation policy and compare throughput and L2 metrics at PAS frequencies of 1000Hz and 10Hz.
+At 1000Hz, we achieve a mean value of 150 requests/sec whereas at 10Hz, we achieve 220 requests/sec (46\% speedup).
+Also, we see 30\% more L2 cache misses per request at 1000Hz, 20\% thereof being code read misses.
+Upstream OSv in contrast is not as significantly affected by change of the PAS frequency, achieving mean values of 180 vs. ~225 requests/sec, respectively (25\% speedup).
+
+We have experimented with several approaches to solve the problems of the PAS in our solution:
+As a first suggestion, we could model CPU0 as a \emph{50 -- 80\% CPU} in our core allocation policy.
+However, this solution is not very general since we lack a precise model for the impact of the cache trashing caused by the PAS.
+Furthermore, the current implementation would require many special cases to support CPUs in non-integer quantities.
+
+Another idea is to declare one core as \emph{the thrashing core}, exclude it from the core allocation and use it to run the PAS.
+The natural downside of this approach is that, if the PAS does not run 100\% of the time, we waste resources on that core.
+A mitigation would be to change the dispatch policy for underloaded stages, i.e., those stages that do not have enough relative load to win a single dedicated CPU core:
+In the core allocation policy presented in Section~\ref{ch:di:pol}, we dispatch threads in underloaded stages round-robin over all cores. \todo{assert this is in}
+With one core selected as the \emph{thrashing core}, we would dispatch those threads on that core, preventing the otherwise negative cache impact on all the other cores which are dedicated to loaded stages.
+
+Finally, we considered defining a dedicated stage for the PAS.
+The main problem with this approach is that our concept is designed for many requests per stage.
+The fictional PAS-stage however would only ever have zero or one runnable thread, thus likely never win a dedicated core.
+Instead, it would be frequently dispatched on a random core and evict that core's stage's working set.
+Experiments showed that this option is not worth pursuing without the concept of a \emph{thrashing core}, at which point one could fully fall back to the proposal in the previous paragraph.
+
+\subsubsection{Impact on Evaluation}
+The primary goal of this thesis is to show that it is possible to implement work-conserving, stage-aware scheduling policy by choosing the right abstractions and mechanisms.
+Ideally, the corresponding scheduling policy should be competitive without further modifications to the remaining operating system.
+However, the schedule for this thesis did not allow us to solve the problems that the page access scanner poses to our scheduling policy.
+\textbf{Therefore, for the entire evaluation, we set the PAS frequency to 10Hz in both upstream OSv and our modified version.}
+As described in the previous section, the reduced frequency removes the impact on core allocation and cache thrashing, which is necessary to show the changes to cache behavior caused by our stage-aware scheduler.
+Despite the modifications to upstream OSv being technically unnecessary, we consider the comparison between the 10Hz-versions of upstream and our version of OSv to be fair, since both configurations benefit equally from the removed impact of the PAS.
+The implementation of a work-around for the PAS is thus left open to future work.
 
 
 \chapter{Evaluation}\label{ch:eval}
