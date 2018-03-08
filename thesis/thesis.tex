@@ -1088,7 +1088,7 @@ By dedicating CPU cores to stages, threads always execute code that is in the pr
 In this chapter, we evaluate our implementation in the OSv library operating system to validate the following theses:
 \begin{enumerate}
     \item Existing applications can adopt our solution with minimal changes required to the existing code.
-        We show this by documenting the adoption of the stage API in MySQL v5.8.
+        We show this by documenting the adoption of the stage API in MySQL v5.6.
     \item Our solution improves relevant performance metrics for these applications compared to upstream OSv and virtualized Linux.
         We show this using industry-standard TPC-C benchmark.
     \item Above performance improvements are due to the stage-aware scheduling technique presented in this thesis:
@@ -1132,8 +1132,85 @@ Finally, we show the performance improvements achieved by the allocation policy 
 % Disabled L2 Prefetching 0x3 to MSR 0x1a4
 
 % TPC-C number of warehouses
+\section{Adopting the Stage API in MySQL}\label{ch:eval:stageapi}
+MySQL is a widely-used open source relational database management system written primarily in C/C++.
+While development already started in 1994, the project continues to evolve until today.
+The MySQL server provides its services over a custom TCP protocol and supports concurrent clients through thread-based concurrency:
+A pool of pre-spawned threads is used to handle incoming connections and additional threads are spawned on demand if the number of concurrent clients exceeds the pool size.
+For this evaluation, we use MySQL 5.6.38 which consists of
+%cschwarz@i30pc35:[~/osv_upstream/modules/mysql_56/src]: cloc .
+%   14808 text files.
+%   13966 unique files.
+%   10324 files ignored.
+%github.com/AlDanial/cloc v 1.72  T=32.70 s (137.4 files/s, 76789.8 lines/s)
+%---------------------------------------------------------------------------------------
+%Language                             files          blank        comment           code
+%---------------------------------------------------------------------------------------
+%C++                                   1164         186090         211489         913611
+%C                                      517          36569          40480         458542
+%C/C++ Header                          1397          51662         115169         206137
+more than 1.5 million lines of code.~\cite{mysqlBeginDevelopment,mysqlThreading,mysqlPopularity}
 
-\section{Stagifying MySQL}\label{ch:eval:stageapi}
+All of the above makes MySQL a prime example application that could benefit from our solution:
+We expose stages to applications via a C++ interface,
+the existing MySQL code-base is large and thus not trivially refactorable to the application architectures presented in Chapter~\ref{ch:relwork} and
+the threading model is compatible with our solution.
+Furthermore, we will show in the subsequent paragraph that MySQL's can benefit from spreading its instruction working set over multiple cores.
+Lastly, databases are still often operated and performance-tuned by database administrators where performance gains through our solution may be tolerable despite the arguably less conventional deployment as a bundled libary OS VM image. \todo{leave that out?} \todo{proof}
+
+We first analyze MySQL performance on bare-metal Linux using the TPC-C benchmark and the Top-Down performance analysis method developed by \citeauthor*{yasinTopdown}~\cite{yasinTopdown} which was also used for large-scale profiling of datacenter applications at Google by \citeauthor*{kanev2015profiling} (see Section~\ref{ch:relwork:profiling}):
+55\% of pipeline slots during a TPC-C benchmark run are frontend-bound, 20\% backend-bound and 5\% lost to bad speculation, leaving merely 20\% of pipeline slots to be actually retired. % topdown_comparison.png
+\todo{intro to top-down?}
+Looking at the the cache behavior, more than 66\% of private L2-cache misses are due to code reads, further supporting the assumption that a MySQL's instruction working set does not fit into the private cache of a single core.
+
+As described in Section~\ref{ch:di:api}, the Stage API requires developers to insert stage switching calls into the request-handling code path such that the underlying thread migration spreads the instruction working set over the available CPU cores.
+Our initial approach for this task was to read the MySQL source code starting at the connection handler and figuring out which of the called code modules are large enough to become separate stages.
+As a result, we used the RAII-style switching to separate out
+\begin{itemize}
+    \item the code interfacing with the network stack \\ (function \lstinline[style=figurecpp]{do_handle_one_connection})
+    \item the SQL parser (function \lstinline[style=figurecpp]{dispatch_command}) and
+    \item the code path handling \textsc{\textit{insert}} queries (function \lstinline[style=figurecpp]{mysql_insert}).
+\end{itemize}
+The above process was very time-consuming because we were not famliar with the MySQL code base and the resulting throughput measured by TPC-C was too unstable to be worth pursuing the approach any further.
+
+In parallel to this thesis, staff at the KIT OS group worked on a simulation-based approach to automatically find optimal stage switching points.
+While the corresponding publication will not be available until April 2018, we can summarize the approach:
+Based on a memory access recorded while running a representative workload, different positions for a given number of stage-switching points are evaluated using a cache-simulator.
+A human then manually extends the source code to include the desired switching points. \todo{cite}
+We used above approach to find an optimal partitioning for three stages. \todo{reason}
+
+The resulting diff statistics are printed in Figure~\ref{fig:eval:api:diffstat} and the full diff can be obtained from the appendix: \todo{appendix}
+It amounts to 54 insertions and two deletions throughout nine files, and 32 lines of these insertions are isolated in two new files prefixed with \texttt{my\_osv} that contain the declaration and definition of stage pointers as global variables.
+This change amounts to only 0.0036\% of the lines of code present in MySQL and is simple to maintain across patch-level changes.
+The design goal of a slim Stage API can therefore be considered fulfilled.
+
+However, there are a number of obvious points for criticism in the above approach:
+At first, the cache-simulator-based switching points are located at semantically unintuitive positions in the source code.
+Thus, while the patch is small in size, a human developer can only port it across patch-levels of a given version of MySQL, hoping that the instruction working set does not change significantly.
+For a new minor or major version, a one-time re-run of the simulation process would thus be required. \todo{comment on this?}
+Secondly, the patches are specific to the simulated cache hierarchy, requiring ready-to-run images to be built per targeted CPU.
+While this is prohibitive for fragmented setups, we expect the targeted medium to large-scale deployments to use homogenous hardware, facilitating deployment.
+Additionally, it should be noted that the very popular Intel x86-64 micro-architectures since \emph{Nehalem} (2008) have used the same cache sizes and associativity per core, although \emph{Skylake} server processors have moved form 256KiB to 1MiB L2 cache in 2017.~\cite{nehalemCacheHierarchy,skylakeServerCacheHierarchy}
+Lastly, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
+Indeed, we can imagine a lot of improvements to the tooling but leave this subject to future work.
+
+\begin{figure}
+\begin{lstlisting}
+git diff --stat 38e2b4d1fe7564b8e1a0d0f0eeb7f542d0d534b6
+ CMakeLists.txt            |  5 ++++-
+ sql/CMakeLists.txt        |  5 ++++-
+ sql/my_osv_stagesched.cc  | 18 ++++++++++++++++++
+ sql/my_osv_stagesched.h   | 14 ++++++++++++++
+ sql/mysqld.cc             |  5 +++++
+ sql/sql_class.h           |  1 +
+ sql/sql_lex.cc            |  3 +++
+ sql/sql_parse.cc          |  2 ++
+ storage/perfschema/pfs.cc |  3 +++
+ 9 files changed, 54 insertions(+), 2 deletions(-)
+\end{lstlisting}
+\caption{The Git diff statistics of all changes to upstream MySQL required to insert the stage-switching points computed by simulation}
+\label{fig:eval:api:diffstat}
+\end{figure}
 
 \section{Whole-System Benchmark with MySQL}\label{ch:eval:perf}
 % hypothesis: Stagified MySQL exhibits higher throughput with our scheduler than on upstream OSv and possibly virtualized Linux
