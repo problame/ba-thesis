@@ -1132,6 +1132,49 @@ Finally, we show the performance improvements achieved by the allocation policy 
 % Disabled L2 Prefetching 0x3 to MSR 0x1a4
 
 % TPC-C number of warehouses
+We evaluate our solution on a single-socket Intel Xeon E5-2618L v3 CPU with 8 cores, 2 hyperthreads each.
+The system has 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMS clocked at 2133 Mhz frequency.
+The CPU's cache hierarchy consists of a 20MiB shared, inclusive, 20-way set associative L3 cache, private unififed 256KiB L2 caches and private separate 32KiB L1-d and L1-i caches.
+All private caches are 8-way set-associative. \todo{need quote?}
+Via the BIOS, we disable hyperthreading because hyperthreads share the private caches and disable all C-states to reduce latency spikes.
+
+The host operating system is Fedora 27 with Linux kernel version 4.13.9 (Fedora package \lstinline[style=figurecpp]{4.13.9-300.fc27.x86_64}).
+For the evaluation, we use the kernel command line parameter \lstinline[style=figurecpp]{isolcpus=2-7} to isolate cores 2 -- 7 from the Linux scheduler.
+We remove the noise caused by frequency scaling by setting the scaling governor to \lstinline[style=figurecpp]{performance} mode and disabling the \lstinline[style=figurecpp]{turbo} frequency range.
+
+Due to the nature of OSv targeting only virtual machines, our evaluation is primarily done using VMs.
+For all experiments, we use the Fedora-packaged QEMU 2.10.0-1 software, which in turn uses Linux KVM and thus Intel VT-x for hardware virtualization.
+We use the virtio network and disk paravirtualization drivers in OSv.
+Disk images are in raw format, located in the host's tmpfs and emulated without caching using pthread-based disk I/O.
+We observed heavy cache thrashing when allowing QEMU helper threads on the same cores as the vCPU threads.
+To be able to show the changes in cache behavior that can be achieved with stage-aware scheduling, we thus use the following CPU configuration:
+Each VM is assigned 6 virtual CPU cores, and each of the corresponding QEMU threads is pinned to a separate core in range 2 -- 7.
+The remaining QEMU threads which are used for timers, async-I/O, etc., are regularly dispatched by the Linux scheduler on the idle cores 0 and 1.
+We run \emph{all} virtual machines in above configuration, and therefore do not compromise the fairness of comparisons made with regards to cache behavior and performance.
+Furthermore, our implementation would not be able to take any action against the QEMU helper threads because it exclusively runs inside the virtual machine.
+However, this issue makes it very clear that real-world deployments of our solution will require further adjustments to the hypervisor configuration.
+\todo{move to limits / future work?}
+
+When quoting benchmarks on \emph{bare-metal} Linux, we refer to measurements conducted directly on the host system.
+We use Docker 1.13 to run the official MySQL 5.6.38 container and use the corresponding command line arguments to execute all MySQL threads on CPUs 2 -- 7.
+The MySQL data directory is bind-mounted from a location in tmpfs.
+
+For evaluating MySQL, we use the industry-standard TPC-C online transaction processing benchmark.
+Specifically, we use the implementation provided by the open source \emph{OLTP Benchmark} project at Git revision \texttt{019d9cf} from Februrary 2018~\cite{oltpbench}.
+To avoid the time-consuming pre-seeding process of the database, we re-use a one-time-generated pre-seed with two TPC-C warehouses. \todo{mention weights?}
+The appendix \todo{appendix} contains the exact benchmark configuration and the preseed for all TPC-C results presented in this chapter.
+
+We run the OLTP benchmark from a separate machine (\emph{benchmark machine}) connected to the main machine using direct 10 Gbit/s ethernet.
+This allows us to use high numbers of concurrent benchmark clients without influencing the CPU time available to the QEMU helper threads on the main machine's core 0 and 1.
+We use a Linux layer 2 bridge device to enable direct connections from the benchmark machine to the virtual machine, thus avoiding most of the overhead of packet filtering on the main machine.
+For bare-metal benchmarks, we also assign an IP address to the the bridge interface on the main machine's host system and insert a wildcard accept rule in the relevant iptables chains.
+
+For capturing performance counter data, we use the Linux \texttt{perf} facility in global-monitoring mode on the main machine for CPUs 2-7.
+We use the \texttt{ukHG} event modifiers to capture all events that happen on these cores, regardless of whether they execute code of the main-machine's user-space, kernel or in the guest.
+We rely on perf's time-multiplexing to record more event types than physical PMUs available on the CPU.~\cite{perfTimeMultiplexing}
+
+Finally, for running orchestrating and scripting the execution of the VM, the OLTP benchmark and perf, and for collecting the benchmark results, we use a self-written benchmarking tool called \texttt{doltp} which can be found in the appendix. \todo{appendix}
+
 \section{Adopting the Stage API in MySQL}\label{ch:eval:stageapi}
 MySQL is a widely-used open source relational database management system written primarily in C/C++.
 While development already started in 1994, the project continues to evolve until today.
