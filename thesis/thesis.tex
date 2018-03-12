@@ -603,9 +603,9 @@ The helper thread will then put the migrating thread's TCB into the correct \lst
 
 One complication of the above procedure are timers:
 Apart from timers specific to a CPU, a thread can program timers as well, for example for use with \textsc{\texttt{sigalarm}}.
-OSv timers are implemented using the CPU-local Advanced Programmable Interrupt Controller (LAPIC) for timer delivery:
 Per CPU, a list of active timers is kept, sorted ascendingly by their expiration time.
-The LAPIC timer is then always programmed to fire at the expiration time of the first timer in the list.
+The OSv timer implementation then programs a signle hardware-timer (\lstinline[style=figurecpp]{clock_event} driver) such that it fires at the nearest expiration time.
+On x86-64, the CPU-local Advanced Programmable Interrupt Controller (LAPIC) timer is used for this purpose.~\cite{intelSDMLAPICTimer}
 In the timer interrupt handler, the expired timers are removed from the sorted list and the LAPIC timer is reprogrammed.
 Threads whose timer fired are then woken, i.e., marked as runnable and put into the CPU's ready queue.
 It is crucial to observe that the upstream OSv timer abstraction does not allow a thread to have timers set on multiple CPUs:
@@ -826,7 +826,7 @@ Let us first look at wakeup-related state transitions that a thread may go throu
     \centering
     \includegraphics[width=\textwidth]{fig_build/sched_state_diag_upstream}
     \caption{Upstream OSv wakup-related thread state transitions: states \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambigous with regard to whether the thread is running or has scheduled out.
-    (Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.)}
+    Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.}
     \label{fig:di:wake:upstreamstates}
 \end{figure}
 
@@ -836,12 +836,11 @@ The remaining triad of \textit{waiting}, \textit{sending\_lock} and \textit{waki
 In each of these states, the thread can either have completed scheduling out or it can still be on the way to do that.
 In the latter case, the thread may even observe that it has already been woken up again by some other thread and move itself from \textit{waking} back to \textit{running}.
 
-Upstream OSv can live with this ambiguous state representation because it never migrates threads on wake.
-In our solution however, we want to do exactly that.
-Why do we need to know so precisely whether the woken-up thread has finished scheduling out or not?
-If the thread is still running, we do not want to migrate it because its current CPU still has a hot cache.
-If the thread was however actualy stopped, we want to migrate it to a less loaded core assigned to the same stage in order to fully utilize available CPU resources.
-And in contrast to a thread that is still running, we can use a more efficient implementation of remote asynchronous thread migration that works without a chasing helper thread.
+Upstream OSv can afford this ambiguous state representation because its wake-up mechanism does nothing but to ensure that the woken thread is made runnable on its current CPU.
+\textbf{Our solution however requires precise knowledge of whether the woken thread is still running or whether it has actually stopped executing on its current CPU.}
+In the former case, we do not want to migrate it because its current CPU still has a hot cache.
+However, in the far more common case of waking up a stopped thread, we want to use the opportunity for load-balancing by migrating the to-be-woken thread to the least-loaded CPU core, thereby maximizing CPU resource usage.
+And because the woken-thread is not running at the time of wake-up, we can implement remote asynchronous thread migration that works without a chasing helper thread.
 
 The first pillar of our work-conserving scheduler implementation is therefore a significant refactoring of the OSv thread states:
 As we already did with the \textit{stagemig\_run} and \textit{stagemig\_sto} states in Section~\ref{ch:di:mig},
@@ -854,7 +853,7 @@ The resulting thread state transitions are depicted in Figure~\ref{fig:di:wake:s
     \centering
     \includegraphics[width=\textwidth]{fig_build/sched_state_diag_spread}
     \caption{Modified OSv wakeup-related thread state transitions: All states are unambious about whether the thread is still running or completed scheduling out.
-        (Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events).
+        Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.
     }
     \label{fig:di:wake:spreadstates}
 \end{figure}
@@ -867,8 +866,8 @@ Let us recall some details on upstream OSv from Section~\ref{ch:di:osv:sched}:
     \item Remote asynchronous thread migration relies on a short-lived helper thread that chases the to-be-migrated thread and eventually performs the same steps required for synchronous thread migration in the name of the to-be-migrated thread.
 \end{enumerate}
 The helper thread is necessary because the timer implementation only allows suspending timers on the core they would fire on.
-Looking at the version control history of upstream OSv, we see that remote asynchronous thread migration is greatly predated by timers.
-Furthermore, upstream only required it for the POSIX \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} API.
+Looking at the version control history of upstream OSv, we see that the current timer implementation (commit 786a576e0, 2013) predates asynchronous thread migration support (commit 6bb95442c, 2016).
+Furthermore, upstream only requires the latter for the POSIX \lstinline[style=figurecpp]{pthread_attr_setaffinity_np} syscall.
 Therefore, we assume that the helper-thread-based solution was considered good enough --- in fact it is a quite elegant engineering trade-off.
 However, we require remote asynchronous thread migration to be fast and thus do not want to pay the price of the helper thread.
 Also, we cannot afford a remote function call to reprogram the source CPU's LAPIC timer.
@@ -883,7 +882,7 @@ We need a waker $T_w$ on CPU $C_1$ be able to migrate a stopped thread $T_s$ fro
 We observe that the timers in step 1 only need to be \emph{removed} remotely and that \emph{resuming} them on CPU $C_3$ is the job of the CPU-local dequeue operation.
 We recall that the CPU-local timer lists are sorted ascendingly by expiration date and that the underlying hardware timer is programmed to the expiration date closest in the future.
 However, it is not a problem if the hardware timer fires and the corresponding timer object is no longer in the list:
-The implementation will simply re-program the hardware timer to the closest timer in the future, i.e. the list head timer's expiration date.
+The implementation will simply re-program the hardware timer to the closest timer in the future, i.e., the list head timer's expiration date.
 Our solution for remotely suspending timers exploits this property:
 We protect each CPU's timer list with a recursive spinlock and extend the timer implementation accordingly.
 The waker can then follow the steps described above.
@@ -934,7 +933,7 @@ After these substantial refactorings, we finally have an efficient way to perfor
 %               track c_in per stage in atomic counters
 %               ... see patch, fairly boring
 %               max_stages, snapshot runqueue counters 
-The aspects of the implementation discussed so far are the mechanisms of our solution.
+The aspects of the design discussed so far are the mechanisms of our solution.
 This section presents the core allocation policy, which is consumed by both synchronous stage-switching and the work-conserving wakeup mechanism.
 
 %Recall that the basic idea of our solution is to dedicate CPU cores and hence their private caches to stages, and only dispatch threads onto those cores that are assigned to the thread's current stage.
