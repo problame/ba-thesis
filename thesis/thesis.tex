@@ -29,8 +29,6 @@
 
 \usepackage{listings}
 
-\usepackage{float} % for figure[H]
-
 % for core allocation pseudo-code mostly...
 \usepackage{amsmath}
 \usepackage{algorithmicx}
@@ -52,6 +50,10 @@
   xleftmargin=\parindent,
   alsodigit={:},
 }
+
+\widowpenalty100000
+\clubpenalty100000
+\raggedbottom
 
 \begin{document}
 \frontmatter
@@ -638,7 +640,7 @@ To avoid build and linker failures, we provide a no-op implementation of the API
 \footnote{The OSv linker ignores missing libraries, and the app does not crash because the OSv implementation of the stage class provides the required functions.}
 Figure \ref{fig:di:api:exampleraw} gives an impression of how the stage API could be used in an existing application.
 
-\begin{figure}[H]
+\begin{figure}
 \begin{lstlisting}[style=figurecpp,morekeywords={stage,stage::define,enqueue}]
 #include <osv/stagesched.h>
 
@@ -672,7 +674,7 @@ In addition to the direct invocation of the switching API, we provide a RAII-sty
 This can be used to shift the responsibility of switching stages from the function caller to the callee, which is particularly useful when a piece of code is large enough to have its own stage but is called from more than one other stage.
 Figure~\ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
 
-\begin{figure}[H]
+\begin{figure}
 \begin{lstlisting}[style=figurecpp,morekeywords={stage_stack,stage,stage::define,stage_stack::guard}]
 #include <osv/stagesched.h>
 
@@ -824,21 +826,25 @@ Utilizing all cores of a multi-core system is thus trivial in theory:
 When a blocked thread is woken up, we find a CPU that has that thread's current stage's code in its cache and enqueue the woken-up thread's TCB into that CPU's runqueue.
 
 However, in practice, this beautiful concept is crushed by the realities of the OSv scheduler implementation.
-Let us first look at wakeup-related state transitions that a thread may go through in upstream OSv:
+Let us first look at wakeup-related state transitions that a thread may go through in upstream OSv depicted in Figure~\ref{fig:di:wake:upstreamstates}:
+The most common case will be that a thread goes to sleep, waiting on some predicate to become true, for example that a timer has expired or that it aquired a mutex.
+The \textit{running} thread will then transition synchronously to the \textit{waiting} state and schedule out.
+Let us now imagine that another thread makes the predicate become true.
+That \emph{waker} knows the threads waiting for this condition and wakes them using the \lstinline[style=figurecpp]{wake()} function, which puts the woken thread's TCBs into their last core's \lstinline[style=figurecpp]{incoming_wakups}, which is in turn eventually drained into the core's runqueue.
 
-\begin{figure}[H]
+The crucial observation for this section is that the corresponding \textbf{OSv thread states do not precisely encode whether the a thread has stopped executing}.
+In fact, only threads in state \textit{queued} are guaranteed to be stopped and only threads in state \textit{running} are guaranteed to be running.
+The remaining triad of \textit{waiting}, \textit{sending\_lock} and \textit{waking} is ambiguous:
+In each of these states, the thread can either have completed scheduling out or it can still be on the way to do that.
+In the latter case, the thread may even observe that it has already been woken up again by some other thread and move itself from \textit{waking} back to \textit{running}.
+
+\begin{figure}
     \centering
     \includegraphics[width=\textwidth]{fig_build/sched_state_diag_upstream}
-    \caption{Upstream OSv wakup-related thread state transitions: states \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambigous with regard to whether the thread is running or has scheduled out.
+    \caption{Upstream OSv wakup-related thread state transitions: States \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambigous with regard to whether the thread is still scheduling out whether it has fully stopped executing.
     Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.}
     \label{fig:di:wake:upstreamstates}
 \end{figure}
-
-The key observation in Figure~\ref{fig:di:wake:upstreamstates} is that the upstream OSv thread states do not encode whether the thread has finished scheduling out.
-In fact, only threads in state \textit{queued} are guaranteed to be stopped and only threads in state \textit{running} are guaranteed to be running.
-The remaining triad of \textit{waiting}, \textit{sending\_lock} and \textit{waking} is ambiguous in that regard:
-In each of these states, the thread can either have completed scheduling out or it can still be on the way to do that.
-In the latter case, the thread may even observe that it has already been woken up again by some other thread and move itself from \textit{waking} back to \textit{running}.
 
 Upstream OSv can afford this ambiguous state representation because its wake-up mechanism does nothing but to ensure that the woken thread is made runnable on its current CPU.
 \textbf{Our solution however requires precise knowledge of whether the woken thread is still running or whether it has actually stopped executing on its current CPU.}
@@ -849,11 +855,12 @@ And because the woken-thread is not running at the time of wake-up, we can imple
 The first pillar of our work-conserving scheduler implementation is therefore a significant refactoring of the OSv thread states:
 As we already did with the \textit{stagemig\_run} and \textit{stagemig\_sto} states in Section~\ref{ch:di:mig},
 we spread the three \textit{waiting}, \textit{sending\_lock} and \textit{waking} states into \textit{$\star$\_run} and \textit{$\star$\_sto} sub-states; the the former suffix represents a still-running thread while the latter represents a stopped thread.
-The context switching routine then implements the switch from \textit{$\star$\_run} to \textit{$\star$\_sto} \emph{after} saving the register state of the thread to its TCB.
-An asynchronous waker can thus cleanly distinguish between running and stopped threads and furthermore use atomic instructions for state transitions.
-The resulting thread state transitions are depicted in Figure~\ref{fig:di:wake:spreadstates}.
+\textbf{The context switching routine then implements the switch from \textit{$\star$\_run} to \textit{$\star$\_sto} after saving the register state of the thread to its TCB.}%
+\footnote{The implementation in the context switching routine is a generalization of the two-step migration mechanism presented in Section~\ref{ch:di:mig}.}
+An asynchronous waker can thus always distinguish between running and stopped threads.
+Figure~\ref{fig:di:wake:spreadstates} presents the resulting state transition diagram.
 
-\begin{figure}[H]
+\begin{figure}
     \centering
     \includegraphics[width=\textwidth]{fig_build/sched_state_diag_spread}
     \caption{Modified OSv wakeup-related thread state transitions: All states are unambious about whether the thread is still running or completed scheduling out.
@@ -954,7 +961,7 @@ After computing a core allocation, we use it to select a target CPU on stage swi
 If a stage has been assigned multiple CPUs, the CPU with the shortest runqueue is chosen.
 Each CPU schedules its runqueue using non-preemptive round robin. \todo{evaluation / discussion}
 After a given core allocation has exceeded the boot-time-configurable \emph{maximum assignment age}, we re-evaluate the core-allocation policy using the then up-to-date stage load distribution.
-It is crucial to observe that this setup creates a feedback-loop depicted in Figure~\ref{fig:ch:di:pol:feedbackloop}:
+It is crucial to observe that this setup creates a feedback-loop depicted as depicted in Figure~\ref{fig:ch:di:pol:feedbackloop}:
 The number of cores available to a stage increases the CPU time available to its runnable threads, thereby avoiding that a single stage becomes a point of congestion.
 Among the cores of a stage, the load is evenly distributed by always choosing the CPU with the shortest runqueue for migrations.
 
@@ -967,7 +974,7 @@ Among the cores of a stage, the load is evenly distributed by always choosing th
 For a more detailed description of the implementation, let us first summarize the requirements of the rest of the system:
 When a thread synchronously switches stages, we need to find a target CPU that is assigned to the target stage.
 When waking up a stopped thread, we need to find a CPU that is assigned to that thread's current stage.
-Whereas stage switches may be relatively infrequent throughout the handling of a single request, that is not true for wakeups, for example because the request handler performs blocking I/O.
+While stage switches may be relatively infrequent throughout the handling of a single request, that is not true for wakeups, for example because the request handler performs blocking I/O.
 Consulting the core allocation should therefore be fast.
 Additionally, all cores use the same core allocation concurrently, but at the same time, our design also involves periodic updating of the assignment.
 The update mechanism must therefore be designed to allow all cores to make progress during an update.
@@ -975,14 +982,10 @@ Lastly, an update should be minimal in the number of cores that switch to anothe
 
 Our implementation is based around the \emph{assignment} data structure which represents a concrete mapping of CPU cores to stages, and the \emph{requirement vector}, which only specifies the number of cores to be assigned to each stage.
 On a system with $C$ cores and $S$ stages, a requirement is a vector
-
     \[ r = \begin{pmatrix} r_1 & r_2 & \dots & r_S \end{pmatrix} \left\text{where}\right r_i \in \mathbb{N}_0 \left \text{and} \right \sum_{i = 1}^{S} r_i  = C. \]
-
 It is important to emphasize that the components of $r$ must be integers, because CPU cores can only be assigned in integer quantities.
 A valid assignment $a_r$ derived from $r$ then maps each of the $C$ cores to exactly one stage:
-
     \[ a_{r} = \begin{pmatrix} a_1 & a_2 & \dots & a_C \end{pmatrix} \wedge \forall s \in 1 \dots S : \vert\{\left i : a_i = s \right \} \vert = r_s \]
-
 When requirements change to $r'$ and we need to update the assignment to $a_{r'}'$, our goal must then be to minimize ${\vert\{\left i : a_i' \ne a_i \right\}\vert}$ because this is the number of cores that incurs capacity i-cache misses due to change of the executed instruction working set partition.
 
 %We compute the requirements vector periodically using the following algorithm:
