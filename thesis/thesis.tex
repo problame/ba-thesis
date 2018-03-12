@@ -31,14 +31,18 @@
 
 \usepackage{float} % for figure[H]
 
+% for core allocation pseudo-code mostly...
 \usepackage{amsmath}
-%\usepackage{algorithmicx}
+\usepackage{algorithmicx}
+\usepackage{varwidth}
+\usepackage{calc} % for \widthof
 %\usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{mathtools}
 \DeclarePairedDelimiter\ceil{\lceil}{\rceil}
 \DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
 \usepackage{amsfonts}
+\usepackage{setspace}
 
 \lstdefinestyle{figurecpp}{
   belowcaptionskip=1\baselineskip,
@@ -522,13 +526,13 @@ In the example above, a \textit{\textsc{select}} request would result in the fol
 %%In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
 %%Before calling \texttt{read} or \texttt{write} on the network socket, the developer would then switch to the network-stack-stage.
 
-Given such a \emph{stagified} application, we then track per thread the association to its current stage in the TCB and per stage the number of threads currently associated with it.
-We use this information to allocate CPU cores among the defined stages proportional to the stages' load.
+Given such a \emph{stagified} application, we then track per thread the association to its current stage in the TCB and per stage the number of threads runnable threads currently associated with it.
+We use this information to periodially compute the \emph{current core allocation}, which assigns CPU cores to stages proportional to the stages' load.
 A core is thus always allocated to exactly one stage. % however, a stage may not have any dedicated cores. only tell that in the details section
 The scheduler then implements the following guiding principle: \textbf{A thread is only dispatched on cores that are allocated to the thread's current stage}.
 When a thread uses the system API to switch to a stage $S$, we choose the least-loaded core $C$ among the cores allocated to $S$ and enqueue the switching thread into $C$'s runqueue.
 When a thread blocks, it no longer counts toward the load of stage but does not lose the association to it.
-Thus, when a blocked thread is woken up again, the \emph{waker} simply evaluates the core allocation policy and enqueue the still-sleeping thread into the target core's runqueue.
+Thus, when a blocked thread is woken up again, the \emph{waker} simply uses the current core allocation to choose a suitable core for the woken thread and enqueue the still-sleeping thread into that core's runqueue.
 
 \begin{figure}[h]
     \missingfigure{visualize the solution}
@@ -888,7 +892,7 @@ We protect each CPU's timer list with a recursive spinlock and extend the timer 
 The waker can then follow the steps described above.
 While the source CPU will incur a spurious timer interrupt, we fully avoid all overhead associated with the original helper thread.
 
-After these substantial refactorings, we finally have an efficient way to perform remote asynchronous thread migration in the context of the waker and thus immediately dispatch a woken thread on a suitable CPU core chosen by the core allocation policy.
+After these substantial refactorings, we finally have an efficient way to perform remote asynchronous thread migration in the context of the waker and thus immediately dispatch a woken thread on a suitable CPU core according to the current core allocation.
 
 \section{Core Allocation Policy}\label{ch:di:pol}
 % remove load balancing + fairness (cpu time, priority queue / sorted list? )
@@ -933,8 +937,11 @@ After these substantial refactorings, we finally have an efficient way to perfor
 %               track c_in per stage in atomic counters
 %               ... see patch, fairly boring
 %               max_stages, snapshot runqueue counters 
-The aspects of the design discussed so far are the mechanisms of our solution.
-This section presents the core allocation policy, which is consumed by both synchronous stage-switching and the work-conserving wakeup mechanism.
+Up to this point, we have discussed the two main mechanisms of our design:
+We use synchronous thread migration for stage switching and asynchronous remote thread migration for load-balancing thread migration on wake-up.
+Also remember that the \textbf{principal rule of our scheduler is to only dispatch threads on cores that are allocated to the thread's current stage}.
+Both mechanisms therefore migrate a thread to the least-loaded core in the set of cores allocated to the thread's current stage.
+This section now presents the policy used to periodically compute the core allocation.
 
 %Recall that the basic idea of our solution is to dedicate CPU cores and hence their private caches to stages, and only dispatch threads onto those cores that are assigned to the thread's current stage.
 %However, in order to fully utilize the available CPU cores, we cannot assume this assignment to be fixed:
@@ -942,24 +949,25 @@ This section presents the core allocation policy, which is consumed by both sync
 %Therefore, the core allocation policy must be periodically re-asssessed, and the system must support a changing core allocation efficiently.
 
 The basic concept of our allocation policy is simple:
-\textbf{We define \emph{stage load} as the number of \emph{runnable} threads in a given stage and dedicate CPU cores to stages proportional to their load.}
-After computing a core allocation, we use it for a configurable amount of time \todo {code or revert to reality} to select a target CPU on stage switch and wake-ups (see Section~\ref{ch:di:mig} and \ref{ch:di:wake}).
+\textbf{We define \emph{stage load} as the number of \emph{runnable} threads in a given stage and dedicate CPU cores to stages proportional to stages' load.}
+After computing a core allocation, we use it to select a target CPU on stage switch and wake-ups (see Sections~\ref{ch:di:mig} and \ref{ch:di:wake}).
 If a stage has been assigned multiple CPUs, the CPU with the shortest runqueue is chosen.
 Each CPU schedules its runqueue using non-preemptive round robin. \todo{evaluation / discussion}
-After an assignment's maximum age has been reached, we compute a new assignment using the then up-to-date stage load distribution.
-It is crucial to observe that this setup creates a \textbf{feedback-loop}:
-The number of cores available to a stage increases the CPU time available to its runnable threads, which in turn reduces the stages load.
-The above strategy thus evens out load differences between stages and CPU cores. \todo{why desirable? queuing theory?}
+After a given core allocation has exceeded the boot-time-configurable \emph{maximum assignment age}, we re-evaluate the core-allocation policy using the then up-to-date stage load distribution.
+It is crucial to observe that this setup creates a feedback-loop depicted in Figure~\ref{fig:ch:di:pol:feedbackloop}:
+The number of cores available to a stage increases the CPU time available to its runnable threads, thereby avoiding that a single stage becomes a point of congestion.
+Among the cores of a stage, the load is evenly distributed by always choosing the CPU with the shortest runqueue for migrations.
 
-\begin{figure}[H]
+\begin{figure}
     \missingfigure[figheight=6cm]{feedback loop as in SRT}
     \caption{The basic feedback loop of our core allocation policy: Stage load is defined as the number of runnable threads in a given stage. CPU cores are allocated to stages proportional to the stage's load.}
+    \label{fig:ch:di:pol:feedbackloop}
 \end{figure}
 
 For a more detailed description of the implementation, let us first summarize the requirements of the rest of the system:
 When a thread synchronously switches stages, we need to find a target CPU that is assigned to the target stage.
 When waking up a stopped thread, we need to find a CPU that is assigned to that thread's current stage.
-While stage switches may be relatively infrequent throughout the handling of a single request, that is not true for wakeups, for example because the request handler performs blocking I/O.
+Whereas stage switches may be relatively infrequent throughout the handling of a single request, that is not true for wakeups, for example because the request handler performs blocking I/O.
 Consulting the core allocation should therefore be fast.
 Additionally, all cores use the same core allocation concurrently, but at the same time, our design also involves periodic updating of the assignment.
 The update mechanism must therefore be designed to allow all cores to make progress during an update.
@@ -968,31 +976,88 @@ Lastly, an update should be minimal in the number of cores that switch to anothe
 Our implementation is based around the \emph{assignment} data structure which represents a concrete mapping of CPU cores to stages, and the \emph{requirement vector}, which only specifies the number of cores to be assigned to each stage.
 On a system with $C$ cores and $S$ stages, a requirement is a vector
 
-    \[ r = \begin{pmatrix} r_1 & r_2 & \dots & r_S \end{pmatrix} \left\text{where}\right r_i \in \mathbb{N}_0 \left \text{and} \right \sum_{i = 1}^{S} r_i  = C \]
+    \[ r = \begin{pmatrix} r_1 & r_2 & \dots & r_S \end{pmatrix} \left\text{where}\right r_i \in \mathbb{N}_0 \left \text{and} \right \sum_{i = 1}^{S} r_i  = C. \]
 
-A valid assignment derived from $r$ then maps each of the $C$ cores to exactly one stage.
+It is important to emphasize that the components of $r$ must be integers, because CPU cores can only be assigned in integer quantities.
+A valid assignment $a_r$ derived from $r$ then maps each of the $C$ cores to exactly one stage:
 
     \[ a_{r} = \begin{pmatrix} a_1 & a_2 & \dots & a_C \end{pmatrix} \wedge \forall s \in 1 \dots S : \vert\{\left i : a_i = s \right \} \vert = r_s \]
 
-When requirements change to $r'$ and we need to update the assignment to $a_{r'}'$, our goal must then be to minimize ${\vert\{\left i : a_i' \ne a_i \right\}\vert}$ because this is the number of cores that will incur capacity i-cache misses due to the core switching to a new stage.
+When requirements change to $r'$ and we need to update the assignment to $a_{r'}'$, our goal must then be to minimize ${\vert\{\left i : a_i' \ne a_i \right\}\vert}$ because this is the number of cores that incurs capacity i-cache misses due to change of the executed instruction working set partition.
 
-We compute the requirements vector periodically using the following algorithm:
-Given the current stage load ${l = \begin{smallmatrix}( l_1 & l_2 & \dots & l_C )\end{smallmatrix}}$, we normalize this vector to $\hat{l}$ such that ${\sum_{i = 1}^{S} \hat{l}_i = 1.0}$.
-We then use ${p = \hat{l}}$ as the initial \emph{priority vector} to distribute $C$ CPU cores among the stages:
-At first, we compute ${f = p * C}$, representing the floating-point quantity of CPUs per stage.
-However, we can only assign integer-quantities of CPUs.
-Therefore, we let ${r' \mathrel{+}= \floor{f}}$ and start a new iteration of the loop using ${p = norm(f - \floor{f})}$ and ${C = C - \sum_{i = 1}^{S} \floor{f}_i}$.
-If ${\floor{f} = \begin{smallmatrix}( 0 & 0 & \dots & 0 )\end{smallmatrix}}$, we shift priorities in $p$ from lowest to highest-priority stage such that after at most $C$ iterations, all CPUs are distributed.~\todo{pseudocode?}
+%We compute the requirements vector periodically using the following algorithm:
+%Given the current stage load ${l = \begin{smallmatrix}( l_1 & l_2 & \dots & l_C )\end{smallmatrix}}$, we normalize this vector to $\hat{l}$ such that ${\sum_{i = 1}^{S} \hat{l}_i = 1.0}$.
+%We then use ${p = \hat{l}}$ as the initial \emph{priority vector} to distribute $C$ CPU cores among the stages:
+%At first, we compute ${f = p * C}$, representing the floating-point quantity of CPUs per stage.
+%However, we can only assign integer-quantities of CPUs.
+%Therefore, we let ${r' \mathrel{+}= \floor{f}}$ and start a new iteration of the loop using ${p = norm(f - \floor{f})}$ and ${C = C - \sum_{i = 1}^{S} \floor{f}_i}$.
+%If ${\floor{f} = \begin{smallmatrix}( 0 & 0 & \dots & 0 )\end{smallmatrix}}$, we shift priorities in $p$ from lowest to highest-priority stage such that after at most $C$ iterations, all CPUs are distributed.~\todo{pseudocode?}
+
+We compute the requirements vector proportional to the current stage load distribution.
+Since we can only assign CPUs to stages in integer quantities, we only use the floored values of the exact proportional distribution.
+The remainders vector is then normalized and used as the priority vector for the next iteration of the loop.
+It can happen that no stage has enough priority to win at least one CPU.
+In those cases, we shift priority from the low-priority stage to the highest-priority stage to ensure that we make progress.
+The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
+
+\begin{figure}
+\centering
+\begin{minipage}{0.9\linewidth}
+\begin{algorithmic}[1]
+    \setstretch{1.22}
+    % Trick with algorithmicx from https://tex.stackexchange.com/questions/113030/indentation-in-the-algorithm-package-after-ensure-require
+    \algrenewcommand\algorithmicensure{%
+    \makebox[\widthof{\textbf{Require:}}][l]{\textbf{Ensure:}}}
+      \Require   \begin{varwidth}[t]{\linewidth}
+        \Statex ${l = \begin{pmatrix} l_1 & l_2 & \dots & l_C \end{pmatrix}}$, current stage load vector
+            \strut
+               \end{varwidth}
+      \Ensure      \begin{varwidth}[t]{\linewidth}
+        \Statex $r$, valid requiremnts vector
+          \strut
+               \end{varwidth}
+
+    \State $\hat{l} \gets norm(l)$ \Comment normalized load vector
+    \State ${p \gets \hat{l}}$ \Comment priority vector
+    \State $c \gets C$ \Comment number of cores left to assign
+    \State $r \gets \begin{pmatrix}0 & 0 & \dots & 0\end{pmatrix}$
+    \While{c > 0}
+        \State \textbf{assert} ${\sum_{i = 1}^{S} p_i = 1.0}$
+        \State ${f \gets p * c}$ \Comment floating-point core count
+        \If{ $\forall i \in 1 \dots S: f_i < 1.0 $ } \Comment priority shifting
+            \State $i_{min} \gets \underset{s\,\in\,1 \dots S}{\text{arg\,min}} f_s$
+            \State $i_{max} \gets \underset{s\,\in\,1 \dots S}{\text{arg\,max}} f_s$
+            \State $p_{i_{max}} \gets p_{i_{max}} + p_{i_{min}}$
+            \State $p_{i_{min}} \gets 0$
+            \State \textbf{continue}
+        \EndIf
+        \State ${r \gets r + \floor{f}}$ \Comment can only assign integer quantities
+        \State ${p \gets norm(f - \floor{f})}$ \Comment priority based on remainders
+        \State ${c \gets c - \sum_{i = 1}^{S} \floor{f}_i}$
+    \EndWhile
+\end{algorithmic}
+\end{minipage}
+\caption{
+    The algorithm to compute the requirement vector proportional to stage load.
+    From the second iteration on, we distribute cores proportional to the remainders of the previous iteration.
+}
+\label{fig:di:pol:reqvectoralg}
+\end{figure}
 
 The minimal transition from $a_r$ to $a_{r'}'$ is then implemented by building a delta vector ${\Delta r = r' - r}$:
 Negative comonents represent stages with excess cores whereas positive components represent need for cores.
 A simple nested loop then re-assigns cores between components of $\Delta r$ and updates the assignment accordingly.
 Note that the constraints on requirement and assignment vectors imply that ${\sum_{i = 1}^{S} \Delta r_i = 0}$, guaranteeing that a full transfer is always possible.
-The asymptotic runtime complexity of loop is in $O(S^2)$, but since we do not expect more than ten stages per application, this is neglegible for this thesis.
+The core re-assignment loop prefers to re-assign cores with a lower index in the global list of cores over those with a higher index.
+This implies that cores with a higher-index switch stages less often given a stable system load.
+The current asymptotic runtime complexity of the loop currently is in $O(S^2 * C^2)$.
+However, we did not spend time on searching lower-runtime algorithms and we do expect most applications to have $S \le 8$ and $C \le 32$, which interpolates to $\approx 100us$ runtime, based on the results of the evaluation. \todo{ref evaluation} % (8^2)×(32^2) * (512ns/(3^2 * 6^2))
+More importantly, the time spent on the computation is amortized because the result is re-used for the time specified via the \lstinline[style=figurecpp]{max_assignment_age} boot-time parameter.
+For future work, it might be worth to investigating more efficent assignment transition algorithms or to consider auto-tuning the \lstinline[style=figurecpp]{max_assignment_age} based on detected system configuration.\todo{leave stuff about complexity in?}
 
 The last problem to solve is the concurrent use and update of the assignment, for which we use OSv's version of read-copy-update~\cite{readCopyUpdate} (RCU):
-When accessing the current assignment through its public getter, we compare the timestamp of the assignment's creation against the current time. \todo{code or revert to reality}
-If the maximum age is exceeded and there is no other thread already computing a new assignment, the calling thread becomes the updater.
+When accessing the current assignment through its public getter, we compare the timestamp of the assignment's creation against the current time.
+If the \lstinline[style=figurecpp]{max_assignment_age} is exceeded and there is no other thread already computing a new assignment, the calling thread becomes the updater.
 RCU allows all other threads to safely use the old assignment until the new one has been computed.
 
 \section{Limitations \& Future Work}\label{ch:di:discuss}
@@ -1005,6 +1070,8 @@ RCU allows all other threads to safely use the old assignment until the new one 
 %   non-preemptive round robin => server tasks are I/O intensive, will thus necessarily perform blocking I/O. we could implement preemptive to be safe, but we are pretty sure the timer would never fire 
 %   policy does not do smoothing in feedback-loop => if we had more time...
 %   core allocation does not work well on idle systems => could implement adaptive scheduler, out of scope for this thesis
+
+Core allocation policy does not support SMT. Show that we need to address this explicitly, draft multi-level version of our algorithm, mention MWAIT again.
 
 
 The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
