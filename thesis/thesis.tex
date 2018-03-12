@@ -939,7 +939,7 @@ After these substantial refactorings, we finally have an efficient way to perfor
 %               max_stages, snapshot runqueue counters 
 Up to this point, we have discussed the two main mechanisms of our design:
 We use synchronous thread migration for stage switching and asynchronous remote thread migration for load-balancing thread migration on wake-up.
-Also remember that the \textbf{principal rule of our scheduler is to only dispatch threads on cores that are allocated to the thread's current stage}.
+Also remember that the principal rule of our scheduler is to only dispatch threads on cores that are allocated to the thread's current stage.
 Both mechanisms therefore migrate a thread to the least-loaded core in the set of cores allocated to the thread's current stage.
 This section now presents the policy used to periodically compute the core allocation.
 
@@ -949,7 +949,7 @@ This section now presents the policy used to periodically compute the core alloc
 %Therefore, the core allocation policy must be periodically re-asssessed, and the system must support a changing core allocation efficiently.
 
 The basic concept of our allocation policy is simple:
-\textbf{We define \emph{stage load} as the number of \emph{runnable} threads in a given stage and dedicate CPU cores to stages proportional to stages' load.}
+\textbf{We define \emph{stage load} as the number of \emph{runnable} threads in a given stage and dedicate CPU cores to stages proportional to the stages' load.}
 After computing a core allocation, we use it to select a target CPU on stage switch and wake-ups (see Sections~\ref{ch:di:mig} and \ref{ch:di:wake}).
 If a stage has been assigned multiple CPUs, the CPU with the shortest runqueue is chosen.
 Each CPU schedules its runqueue using non-preemptive round robin. \todo{evaluation / discussion}
