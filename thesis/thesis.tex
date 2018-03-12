@@ -1076,6 +1076,8 @@ RCU allows all other threads to safely use the old assignment until the new one 
 
 Core allocation policy does not support SMT. Show that we need to address this explicitly, draft multi-level version of our algorithm, mention MWAIT again.
 
+We require control of the cache state, i.e. vCPUs in uncommon configuration. See Evaluation.
+This is not guaranteed in cloud hosting environments and thus limits applicability.. This is not always guaranteed in cloud hosting environment is operational burden 
 
 The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
 More elaborate discussion on design trade-offs is deferred to then end of this chapter and the evaluation.
@@ -1180,7 +1182,7 @@ In this chapter, we evaluate our implementation in the OSv library operating sys
 
 The remainder of this chapter is structured accordingly:
 Section~\ref{ch:eval:setup} describes the hard- and software setup common to all measurements presented in this thesis.
-Subsequently, we show the adoption of the stage API in MySQL~v5.8 in Section~\ref{ch:eval:stageapi}.
+Subsequently, we show the adoption of the stage API in MySQL~v5.6 in Section~\ref{ch:eval:stageapi}.
 Section~\ref{ch:eval:perf} then presents the MySQL performance comparison using TPC-C.
 The remaining sections cover the validation of our design assumptions:
 In Section~\ref{ch:eval:perfcache}, we show that we successfully spread MySQL's instruction working set over multiple cores.
@@ -1206,48 +1208,62 @@ Finally, we show the performance improvements achieved by the allocation policy 
 % Disabled L2 Prefetching 0x3 to MSR 0x1a4
 
 % TPC-C number of warehouses
-We evaluate our solution on a single-socket Intel Xeon E5-2618L v3 CPU with 8 cores, 2 hyperthreads each.
-The system has 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMS clocked at 2133 Mhz frequency.
+We evaluate our solution on a single-socket Intel Xeon E5-2618L v3 CPU.
+The system supports simultaneous multi-threading (SMT) with 8 cores, 2 hardware threads each.
+The system has 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMs clocked at 2133Mhz.
 The CPU's cache hierarchy consists of a 20MiB shared, inclusive, 20-way set associative L3 cache, private unififed 256KiB L2 caches and private separate 32KiB L1-d and L1-i caches.
 All private caches are 8-way set-associative. \todo{need quote?}
-Via the BIOS, we disable hyperthreading because hyperthreads share the private caches and disable all C-states to reduce latency spikes.
+We disable SMT via the BIOS because our core allocation policy does not support it. \todo{ref}
+Furthermore, we disable all C-states to reduce latency spikes.
 
-The host operating system is Fedora 27 with Linux kernel version 4.13.9 (Fedora package \lstinline[style=figurecpp]{4.13.9-300.fc27.x86_64}).
-For the evaluation, we use the kernel command line parameter \lstinline[style=figurecpp]{isolcpus=2-7} to isolate cores 2 -- 7 from the Linux scheduler.
-We remove the noise caused by frequency scaling by setting the scaling governor to \lstinline[style=figurecpp]{performance} mode and disabling the \lstinline[style=figurecpp]{turbo} frequency range.
+We use the Fedora 27 Linux distribution with Linux kernel version 4.13.9 (Fedora package \lstinline[style=figurecpp]{4.13.9-300.fc27.x86_64}) as the machine operating system.
+We remove the measurement noise caused by dynamic voltage and frequency scaling by setting the scaling governor to \lstinline[style=figurecpp]{performance} mode and disabling the \lstinline[style=figurecpp]{turbo} frequency range.
 
-Due to the nature of OSv targeting only virtual machines, our evaluation is primarily done using VMs.
+Due to the nature of OSv targeting only virtual machines, our evaluation is done using VMs.
 For all experiments, we use the Fedora-packaged QEMU 2.10.0-1 software, which in turn uses Linux KVM and thus Intel VT-x for hardware virtualization.
 We use the virtio network and disk paravirtualization drivers in OSv.
 Disk images are in raw format, located in the host's tmpfs and emulated without caching using pthread-based disk I/O.
 We observed heavy cache thrashing when allowing QEMU helper threads on the same cores as the vCPU threads.
 To be able to show the changes in cache behavior that can be achieved with stage-aware scheduling, we thus use the following CPU configuration:
-Each VM is assigned 6 virtual CPU cores, and each of the corresponding QEMU threads is pinned to a separate core in range 2 -- 7.
-The remaining QEMU threads which are used for timers, async-I/O, etc., are regularly dispatched by the Linux scheduler on the idle cores 0 and 1.
-We run \emph{all} virtual machines in above configuration, and therefore do not compromise the fairness of comparisons made with regards to cache behavior and performance.
-Furthermore, our implementation would not be able to take any action against the QEMU helper threads because it exclusively runs inside the virtual machine.
-However, this issue makes it very clear that real-world deployments of our solution will require further adjustments to the hypervisor configuration.
-\todo{move to limits / future work?}
+We isolate physical cores 2 -- 7 from the Linux scheduler using the \lstinline[style=figurecpp]{isolcpus=2-7} kernel command line parameter.
+The VM is then started with 6 virtual CPU cores (vCPUs) and we map each of the QEMU vCPU threads to one of the isolated cores in range 2 -- 7.
+The remaining QEMU threads which are used for timers, async-I/O, etc., continue to be dispatched by the Linux scheduler on cores 0 and 1.
 
-When quoting benchmarks on \emph{bare-metal} Linux, we refer to measurements conducted directly on the host system.
-We use Docker 1.13 to run the official MySQL 5.6.38 container and use the corresponding command line arguments to execute all MySQL threads on CPUs 2 -- 7.
-The MySQL data directory is bind-mounted from a location in tmpfs.
+When quoting benchmarks on Linux, we refer to measurements conducted in a virtual machine running the official MySQL 5.6.38 Docker image.
+Inside the VM, we bind-mount the MySQL data directory from the ext4-formatted root partition on the emulated HDD.
+With regards to the file system, this gives the Linux VM a slight advandtage over our solution and upstream OSv because ext4 has generally lower overhead. \todo{proof}
+For all other aspects, the QEMU configuration described OSv applies.
 
-For evaluating MySQL, we use the industry-standard TPC-C online transaction processing benchmark.
-Specifically, we use the implementation provided by the open source \emph{OLTP Benchmark} project at Git revision \texttt{019d9cf} from Februrary 2018~\cite{oltpbench}.
-To avoid the time-consuming pre-seeding process of the database, we re-use a one-time-generated pre-seed with two TPC-C warehouses. \todo{mention weights?}
+The goal of the above setup is to give the guest operating system control of the cache state of its vCPUs.
+This is required for our solution because all expected performance benefits are achieved by optimizing cache behavior.
+However, we are also unaware of any factors that would disadvantage in the comparisons made in this chapter.
+
+For evaluating MySQL, we use the industry-standard TPC-C online transaction processing benchmark~\cite{tpccSpec}.
+TPC-C simulates an online transaction processing workload by modelling a retail company with warehouses and distribution districts that handles sales transactions at sales terminals.
+While the number of warehouses control the amount of data stored in the database, the number of terminals controls the the number of concurrent clients to the database system.
+We use the benchmark implementation provided by the open source \emph{OLTP Benchmark} project at Git revision \texttt{019d9cf} from Februrary 2018~\cite{oltpbench}.
+The process of provisioning the database with test data is very time-consuming and not relevant to the benchmarks in this thesis.
+Therefore, we re-use a one-time-generated pre-seed with two. \todo{mention weights?}
 The appendix \todo{appendix} contains the exact benchmark configuration and the preseed for all TPC-C results presented in this chapter.
 
-We run the OLTP benchmark from a separate machine (\emph{benchmark machine}) connected to the main machine using direct 10 Gbit/s ethernet.
+We run the TPC-C benchmark driver from a separate machine (\emph{benchmark machine}) connected to the main machine using direct 10 Gbit/s ethernet.
 This allows us to use high numbers of concurrent benchmark clients without influencing the CPU time available to the QEMU helper threads on the main machine's core 0 and 1.
 We use a Linux layer 2 bridge device to enable direct connections from the benchmark machine to the virtual machine, thus avoiding most of the overhead of packet filtering on the main machine.
-For bare-metal benchmarks, we also assign an IP address to the the bridge interface on the main machine's host system and insert a wildcard accept rule in the relevant iptables chains.
 
 For capturing performance counter data, we use the Linux \texttt{perf} facility in global-monitoring mode on the main machine for CPUs 2-7.
 We use the \texttt{ukHG} event modifiers to capture all events that happen on these cores, regardless of whether they execute code of the main-machine's user-space, kernel or in the guest.
-We rely on perf's time-multiplexing to record more event types than physical PMUs available on the CPU.~\cite{perfTimeMultiplexing}
+We found that without these modifiers, the OSv caused by the application in OSv are not visible because unlike the Linux VM, OSv does not need to change the privilege level when executing application code.
+For recording more event types than physical PMUs available on the CPU, we use perf's time-multiplexing feature, which re-programs the PMUs at the host kernel's compile-time configurable \textsc{\texttt{hz}} frequency.
+On our host system, this is \texttt{HZ=1000}.~\cite{perfTimeMultiplexing}
+\todo{change that?}
 
-Finally, for running orchestrating and scripting the execution of the VM, the OLTP benchmark and perf, and for collecting the benchmark results, we use a self-written benchmarking tool called \texttt{doltp} which can be found in the appendix. \todo{appendix}
+For running orchestrating and scripting the execution of VMs, the OLTP benchmark and perf, and for collecting the benchmark results, we use a self-written benchmarking tool called \texttt{doltp} which can be found in the appendix.
+
+We process the result data using Python, depending on the pandas 0.22 package in combination with numpy 1.14.0 and matplotlib 2.1.2.
+All graphs and figures in this chapter are rendered reproducibly from the raw data.
+All scripts used for this process as well as the raw data can be found in the appendix.
+\todo{check that + appendix}
+
 
 \section{Adopting the Stage API in MySQL}\label{ch:eval:stageapi}
 MySQL is a widely-used open source relational database management system written primarily in C/C++.
@@ -1268,51 +1284,47 @@ For this evaluation, we use MySQL 5.6.38 which consists of
 %C/C++ Header                          1397          51662         115169         206137
 more than 1.5 million lines of code.~\cite{mysqlBeginDevelopment,mysqlThreading,mysqlPopularity}
 
+Furthermore, MySQL exhibits the micro-architectural profile of data-center applications observed by \citeauthor*{kanev2015profiling} at Google (see Section~\ref{ch:relwork:profiling}):
+55\% of pipeline slots during a TPC-C benchmark run are frontend-bound, 20\% backend-bound and 5\% lost to bad speculation, leaving merely 20\% of pipeline slots to be actually retired. % topdown_comparison.png, Docker
+Looking at L2 cache misses, we observe more than 66\% of private L2-cache misses are due to code reads.
+\todo{intro to top-down?, proof? i measured that...}
+
+
 All of the above makes MySQL a prime example application that could benefit from our solution:
 We expose stages to applications via a C++ interface,
-the existing MySQL code-base is large and thus not trivially refactorable to the application architectures presented in Chapter~\ref{ch:relwork} and
-the threading model is compatible with our solution.
-Furthermore, we will show in the subsequent paragraph that MySQL's can benefit from spreading its instruction working set over multiple cores.
+the existing MySQL code-base is large and thus not trivially refactorable to the application architectures presented in Chapter~\ref{ch:relwork},
+and the threading model is compatible with our solution.
+The L2 metrics further support the assumption that MySQL's can benefit from spreading its instruction working set over multiple cores.
 Lastly, databases are still often operated and performance-tuned by database administrators where performance gains through our solution may be tolerable despite the arguably less conventional deployment as a bundled libary OS VM image. \todo{leave that out?} \todo{proof}
 
-We first analyze MySQL performance on bare-metal Linux using the TPC-C benchmark and the Top-Down performance analysis method developed by \citeauthor*{yasinTopdown}~\cite{yasinTopdown} which was also used for large-scale profiling of datacenter applications at Google by \citeauthor*{kanev2015profiling} (see Section~\ref{ch:relwork:profiling}):
-55\% of pipeline slots during a TPC-C benchmark run are frontend-bound, 20\% backend-bound and 5\% lost to bad speculation, leaving merely 20\% of pipeline slots to be actually retired. % topdown_comparison.png
-\todo{intro to top-down?}
-Looking at the the cache behavior, more than 66\% of private L2-cache misses are due to code reads, further supporting the assumption that a MySQL's instruction working set does not fit into the private cache of a single core.
-
 As described in Section~\ref{ch:di:api}, the Stage API requires developers to insert stage switching calls into the request-handling code path such that the underlying thread migration spreads the instruction working set over the available CPU cores.
-Our initial approach for this task was to read the MySQL source code starting at the connection handler and figuring out which of the called code modules are large enough to become separate stages.
-As a result, we used the RAII-style switching to separate out
+Our initial approach for this task was to read the MySQL source code, starting at the connection handler and figuring out which of the called code modules are large enough to become separate stages.
+As a result, we used the RAII-style switching to separate
 \begin{itemize}
-    \item the code interfacing with the network stack \\ (function \lstinline[style=figurecpp]{do_handle_one_connection})
+    \item the code interfacing with the network stack \\ (function \lstinline[style=figurecpp]{do_handle_one_connection}),
     \item the SQL parser (function \lstinline[style=figurecpp]{dispatch_command}) and
     \item the code path handling \textsc{\textit{insert}} queries (function \lstinline[style=figurecpp]{mysql_insert}).
 \end{itemize}
-The above process was very time-consuming because we were not famliar with the MySQL code base and the resulting throughput measured by TPC-C was too unstable to be worth pursuing the approach any further.
+The above process was very time-consuming because we were not famliar with the MySQL code base and the resulting throughput measured by TPC-C was too unstable to make it worth pursuing the approach any further.
 
 In parallel to this thesis, staff at the KIT OS group worked on a simulation-based approach to automatically find optimal stage switching points.
 While the corresponding publication will not be available until April 2018, we can summarize the approach:
-Based on a memory access recorded while running a representative workload, different positions for a given number of stage-switching points are evaluated using a cache-simulator.
-A human then manually extends the source code to include the desired switching points. \todo{cite}
-We used above approach to find an optimal partitioning for three stages. \todo{reason}
+At first, a memory access trace is recorded using a full-system simulator while running a representative workload.
+In addition to the access trace, a log of the function calls made during each incoming request is made.
+The second step is then responsible for finding the optimal position of $N$ stage switching points:
+For every combination of $N$ different functions, it replays the memory access trace in a cache simulator and counts the cache misses.
+The combination of functions with the minimal number of misses is then chosen as migration points under the assumption that they represent an optimal working set partitioning.
+A human then manually inserts the switching calls directly before the function call.\todo{cite}
 
+For this thesis, we used the above approach to find an optimal partitioning for 3 stages.
+A larger number of stages was impractical due to different schedules and the runtime of above algorithm.
 The resulting diff statistics are printed in Figure~\ref{fig:eval:api:diffstat} and the full diff can be obtained from the appendix: \todo{appendix}
 It amounts to 54 insertions and two deletions throughout nine files, and 32 lines of these insertions are isolated in two new files prefixed with \texttt{my\_osv} that contain the declaration and definition of stage pointers as global variables.
 This change amounts to only 0.0036\% of the lines of code present in MySQL and is simple to maintain across patch-level changes.
 The design goal of a slim Stage API can therefore be considered fulfilled.
 
-However, there are a number of obvious points for criticism in the above approach:
-At first, the cache-simulator-based switching points are located at semantically unintuitive positions in the source code.
-Thus, while the patch is small in size, a human developer can only port it across patch-levels of a given version of MySQL, hoping that the instruction working set does not change significantly.
-For a new minor or major version, a one-time re-run of the simulation process would thus be required. \todo{comment on this?}
-Secondly, the patches are specific to the simulated cache hierarchy, requiring ready-to-run images to be built per targeted CPU.
-While this is prohibitive for fragmented setups, we expect the targeted medium to large-scale deployments to use homogenous hardware, facilitating deployment.
-Additionally, it should be noted that the very popular Intel x86-64 micro-architectures since \emph{Nehalem} (2008) have used the same cache sizes and associativity per core, although \emph{Skylake} server processors have moved form 256KiB to 1MiB L2 cache in 2017.~\cite{nehalemCacheHierarchy,skylakeServerCacheHierarchy}
-Lastly, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
-Indeed, we can imagine a lot of improvements to the tooling but leave this subject to future work.
-
 \begin{figure}
-\begin{lstlisting}
+\begin{lstlisting}[style=figurecpp]
 git diff --stat 38e2b4d1fe7564b8e1a0d0f0eeb7f542d0d534b6
  CMakeLists.txt            |  5 ++++-
  sql/CMakeLists.txt        |  5 ++++-
@@ -1328,6 +1340,16 @@ git diff --stat 38e2b4d1fe7564b8e1a0d0f0eeb7f542d0d534b6
 \caption{The Git diff statistics of all changes to upstream MySQL required to insert the stage-switching points computed by simulation}
 \label{fig:eval:api:diffstat}
 \end{figure}
+
+However, there are a number of obvious points for criticism in the above approach:
+At first, the cache-simulator-based switching points are located at semantically unintuitive positions in the source code.
+Thus, while the patch is small in size, a human developer can only port it across patch-levels of a given version of MySQL, hoping that the instruction working set does not change significantly.
+For a new minor or major version, a one-time re-run of the simulation process would thus be required. \todo{comment on this?}
+Secondly, the patches are specific to the simulated cache hierarchy, requiring ready-to-run images to be built per targeted CPU.
+While this is prohibitive for fragmented setups, we expect the targeted medium to large-scale deployments to use homogenous hardware, facilitating deployment.
+Additionally, it should be noted that the very popular Intel x86-64 micro-architectures since \emph{Nehalem} (2008) have used the same cache sizes and associativity per core, although \emph{Skylake} server processors have moved form 256KiB to 1MiB L2 cache in 2017.~\cite{nehalemCacheHierarchy,skylakeServerCacheHierarchy}
+Lastly, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
+Indeed, we can imagine a lot of improvements to the tooling but leave this subject to future work.
 
 \section{Whole-System Benchmark with MySQL}\label{ch:eval:perf}
 % hypothesis: Stagified MySQL exhibits higher throughput with our scheduler than on upstream OSv and possibly virtualized Linux
