@@ -120,7 +120,7 @@ Specifically, our contributions are as follows:
     \item We analyze the design and implementation of the aforementioned proof-of-concept implementation at the KIT OS group and point out why it is not work-conserving.
     \item We present OS abstractions and a user-space C++ API for applications to manually define stages and stage switching points in the request-handling code path.
     \item We present the design and implementation of a work-conserving scheduling policy that allocates CPUs to stages and migrates threads as necessary to preserve warm instruction-caches.
-    \item We show that appropriate stage partitioning and switching points lead to a reduced cache miss rate of X\% in synthetic benchmarks and throughput gains of X\% in a stage-aware version of MySQL under the TPC-C benchmark.\todo{measurement}
+    \item We show that appropriate stage partitioning and switching points lead to a reduced cache miss rate of X\% throughput gains of X\% in a stage-aware version of MySQL under the TPC-C benchmark.\todo{measurement}
 \end{itemize}
 
 The remainder of this thesis is structured accordingly.
@@ -303,7 +303,7 @@ However, the potential performance gains and cost savings due to improved cache 
 \citeauthor*{kanev2015profiling} identify a significantly higher amount of pipeline stalls in real-world datacenter applications when compared to the SPEC CPU2006 benchmark.
 Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
 a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
-the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be front-end bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.\todo{do not require pre-existing knowledge about arch}
+the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be frontend-bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.\todo{do not require pre-existing knowledge about arch}
 In particular, the authors find that more than 5\% of cycles are wasted due to empty front-end buffers, which is attributed to instruction read misses in the private L2 cache, resulting in slow accesses to the CPU's shared last level cache.
 Additionally, the observations confirm that applications under active development grow in their instruction working set, worsening the situation.%
 \footnote{The authors present exemplary results of up to 27\% per year.}
@@ -605,7 +605,6 @@ However, threads may also migrate themselves to another CPU while still running,
 Let us call this case \emph{synchronous thread migration}:
 In OSv, the migrating thread spawns a short-lived helper thread and immediately schedules out.
 The helper thread will then put the migrating thread's TCB into the correct \lstinline[style=figurecpp]{incoming_wakeup} queue.~\cite{osvGit}
-\todo{mention they also had thread migration of running remote threads }
 
 One complication of the above procedure are timers:
 Apart from timers specific to a CPU, a thread can program timers as well, for example for use with \textsc{\texttt{sigalarm}}.
@@ -887,7 +886,7 @@ Let us therefore reconsider the minimal requirements to make remote asynchronous
 We need a waker $T_w$ on CPU $C_1$ be able to migrate a stopped thread $T_s$ from a remote source CPU $C_2$ to a remote destination CPU $C_3$. $T_w$ must
 \begin{enumerate}
     \item remove $T_s$'s timers from $C_2$'s timer list,
-    \item put $T_s$'s TCB into the incoming migrations queue of $C_3$ that corresponds to CPU $C_1$ and \todo{check if we actually do this correctly}
+    \item put $T_s$'s TCB into the incoming migrations queue of $C_3$ that corresponds to CPU $C_1$ and
     \item set the corresponding bit in $C_3$'s incoming migrations bitmask.
 \end{enumerate}
 We observe that the timers in step 1 only need to be \emph{removed} remotely and that \emph{resuming} them on CPU $C_3$ is the job of the CPU-local dequeue operation.
@@ -1053,18 +1052,19 @@ The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
 \label{fig:di:pol:reqvectoralg}
 \end{figure}
 
-The minimal transition from $a_r$ to $a_{r'}'$ is then implemented by building a delta vector ${\Delta r = r' - r}$:
+The \emph{minimal transition} from $a_r$ to $a_{r'}'$ is then implemented by building a delta vector ${\Delta r = r' - r}$:
 Negative comonents represent stages with excess cores whereas positive components represent need for cores.
 A simple nested loop then re-assigns cores between components of $\Delta r$ and updates the assignment accordingly.
 Note that the constraints on requirement and assignment vectors imply that ${\sum_{i = 1}^{S} \Delta r_i = 0}$, guaranteeing that a full transfer is always possible.
 The core re-assignment loop prefers to re-assign cores with a lower index in the global list of cores over those with a higher index.
 This implies that cores with a higher-index switch stages less often given a stable system load.
 The current asymptotic runtime complexity of the loop currently is in $O(S^2 * C^2)$.
-However, we did not spend time on searching lower-runtime algorithms and we do expect most applications to have $S \le 8$ and $C \le 32$, which interpolates to $\approx 100us$ runtime, based on the results of the evaluation. \todo{ref evaluation} % (8^2)×(32^2) * (512ns/(3^2 * 6^2))
+However, we did not spend time on searching lower-runtime algorithms and we do expect most applications to have $S \le 8$ and $C \le 32$, which interpolates to $\approx 200us$ runtime, based on the results of the evaluation. \todo{ref evaluation} % (8^2)×(32^2) * (512ns/(3^2 * 6^2))
 More importantly, the time spent on the computation is amortized because the result is re-used for the time specified via the \lstinline[style=figurecpp]{max_assignment_age} boot-time parameter.
 For future work, it might be worth to investigating more efficent assignment transition algorithms or to consider auto-tuning the \lstinline[style=figurecpp]{max_assignment_age} based on detected system configuration.\todo{leave stuff about complexity in?}
 
-The last problem to solve is the concurrent use and update of the assignment, for which we use OSv's version of read-copy-update~\cite{readCopyUpdate} (RCU):
+The last problem of the updating procedure is to support concurrent use of the old assignment while computing a new one.
+We use OSv's version of read-copy-update~\cite{readCopyUpdate} (RCU) to accomplish this:
 When accessing the current assignment through its public getter, we compare the timestamp of the assignment's creation against the current time.
 If the \lstinline[style=figurecpp]{max_assignment_age} is exceeded and there is no other thread already computing a new assignment, the calling thread becomes the updater.
 RCU allows all other threads to safely use the old assignment until the new one has been computed.
