@@ -1069,6 +1069,17 @@ When accessing the current assignment through its public getter, we compare the 
 If the \lstinline[style=figurecpp]{max_assignment_age} is exceeded and there is no other thread already computing a new assignment, the calling thread becomes the updater.
 RCU allows all other threads to safely use the old assignment until the new one has been computed.
 
+An important detail of the above algorithm is that a core assignment vector that assigns 0 cores to a given stage is valid.
+For example, another stage may be assigned all available cores.
+However, our stage switching implementation requires a target CPU at the time the thread calls the stage switching API.
+In other words: We do not  have a mechanism to queue up threads whose stage has not been assigned a dedicated core.
+Our solution in this situation is to always choose the core $C_v$ with the highest index in the global list of cores as the victim core that must incur the i-cache miss for the underloaded stages' threads.
+The reasoning behind this decision is that the described situation should be rare in the first place:
+If a stage is constantly underloaded, the stage-switching points were likely not chosen for a representative workload.
+The idea behind choosing $C_v$ and not, for example, $C_0$, is that the core with the highest index is already advantaged in the \emph{minimal transition} algorithm:
+$C_v$ will least frequently switch stages and is therefore best-suited to be penalized with cache-thrashing threads from the underloaded stage.
+Validating and improving this workaround is subject for future work.
+
 \section{Limitations \& Future Work}\label{ch:di:discuss}
 \blindtext
 % big picture
@@ -1105,12 +1116,12 @@ We acknowledge that more recent runtimes with event-driven concurrency or M:N sc
 
 \subsection{OSv's Page Access Scanner}
 During the implementation of the core allocation policy we found that an OSv system thread called \emph{page access scanner} (PAS) consumes significant CPU time.
-It is unpinned (not per-cpu) and thus always executes on CPU0 in our solution because we removed the upstream scheduler's load balancing mechanism and only provide stage-aware scheduling to applications, not OSv system threads.
+It is unpinned (not per-cpu) and thus always executes on cpu0 in our solution because we removed the upstream scheduler's load balancing mechanism and only provide stage-aware scheduling to applications, not OSv system threads.
 
 Since the PAS is apparently the only unpinned system thread that consumes significant CPU time, we investigated it more closely:
 OSv's main filesystem is a port of the Zettabyte File System (ZFS) which includes its own Adaptive Replacement Cache (ARC).
 The OSv page cache uses the PAS thread to inform the ARC about recent usage of file-backed pages by checking and subsequently clearing the page table entries' accessed bits.
-The PAS consists of an infinite loop that self-tunes the CPU time it consumes through a target value $t \in [0.1 and 20]$:
+The PAS consists of an infinite loop that self-tunes the CPU time it consumes through a target value $t \in [0.1, 20]$:
 It scans pages for $t$\% and then sleeps for $1-t$\% of the time it runs, where $t$ depends on a decaying average of the page access rate.
 The loop runs at a hard-coded frequency of 1000Hz.
 While this value is respected in the formula to calculate the maximum time the PAS may run before going to sleep, changing it affects the effective amount of work done by the PAS:
@@ -1120,22 +1131,43 @@ As a side-effect, a reduced frequency also lowers the temporal resolution of the
 Our core allocation policy does not handle this situation well:
 We track stage load in the stage switching and the reschedule routines, not by summing up the length of a stage's cores' runqueues.
 Any load caused by system threads is thus invisible to our policy, which is generally acceptable because most system threads are per-cpu-threads and usually sleep.
-However, the PAS is an exception in this case because it executes only on CPU0 and is invisible in the stage load vector.
-Whenever the core allocation policy assign CPU0 to a stage, that stage's threads compete with the PAS for CPU-time.
+However, the PAS is an exception in this case because it executes only on cpu0 and is invisible in the stage load vector.
+Whenever the core allocation policy assigns cpu0 to a stage, that stage's threads compete with the PAS for CPU-time.
 %Within a stage, we always enqueue a thread to the core with the shortest runqueue.
 %At a high-frequency of PAS invocations (1000Hz), highto a  core load-balance b
-Furthermore, the high frequency of PAS invocations (1000Hz) is detrimental to cache performance on CPU0:
-The PAS thread's instruction working set is disjoint from the stage threads' working set and given that the latter barely fits the CPU-private cache, the frequent scheduling of the PAS thread causes thrashing of that cache on CPU0.
+Furthermore, the high frequency of PAS invocations (1000Hz) is detrimental to cache performance on cpu0:
+The PAS thread's instruction working set is disjoint from the stage threads' working set and given that the latter barely fits the CPU-private cache, the frequent scheduling of the PAS thread causes thrashing of that cache on cpu0.
 %At first, we must emphasize that the use of non-preemptive round-robin scheduling per CPU is not problematic because the PAS thread consistently sleeps after less than 500 $\mu s$ of execution.
 %However, a file-system intensive application like MySQL drives $t$ toward $20\%$ of targeted CPU time, thus leaving only 80\% of CPU 0's  time to the stage's threads.
 
-To demonstrate the effects described above, we run a single-terminal TPC-C benchmark againt stagified MySQL using our core allocation policy and compare throughput and L2 metrics at PAS frequencies of 1000Hz and 10Hz.
-At 1000Hz, we achieve a mean value of 150 requests/sec whereas at 10Hz, we achieve 220 requests/sec (46\% speedup).
-Also, we see 30\% more L2 cache misses per request at 1000Hz, 20\% thereof being code read misses.
-Upstream OSv in contrast is not as significantly affected by change of the PAS frequency, achieving mean values of 180 vs. ~225 requests/sec, respectively (25\% speedup).
+We can quantify the above effect using the TPC-C benchmark by running the single-terminal configuration against MySQL on OSv with 1000Hz and 10Hz PAS frequency.
+The results are shown in Figure~\ref{fig:ch:di:osvpageaccessscannerbench}:
+We observe that our solution experiences a far more significant speedup compared to upstream OSv.
+More importantly, the speed-up correlates with an increase in cache hits.
+We interpret this as a confirmation of our assumption that the frequent invocations of the PAS thrash the L2-cache of cpu0 and hence lead to frequent eviction of the instruction working set of the stage assigned to that core.
 
-We have experimented with several approaches to solve the problems of the PAS in our solution:
-As a first suggestion, we could model CPU0 as a \emph{50 -- 80\% CPU} in our core allocation policy.
+\begin{figure}[h]
+\centering
+\begin{tabular}{| r | c | c | c | c |}
+    \hline
+    \text{Build} & \multicolumn{2}{|c|}{Upstream} & \multicolumn{2}{|c|}{Our Solution} \\
+    \hline
+    Frequency  & req/sec & L2 i-hits & req/sec & L2 i-hits \\
+    \hline
+    \text{1000 Hz} & 180 & X \% & 150 & X \%  \\
+    \hline
+    \text{10 Hz} & 225 & X \% & 220 & X \% \\
+    \hline
+    \hline
+    \textbf{Improvement} & \textbf{25\%} & \textbf{X\%} & \textbf{46\%} & \textbf{X\%} \\
+    \hline
+\end{tabular}
+\caption{The effect of changing the PAS frequency on TPC-C throughput and L2 code hit ratio. Speedup in throughput correlates with L2 i-cache hit rate and reduc.}
+\label{fig:ch:di:osvpageaccessscannerbench}
+\end{figure}
+
+We have considered several approaches to solve the problems of the PAS in the core allocation policy:
+At first, one could model cpu0 as a \emph{{50\,--\,80\%} CPU}.
 However, this solution is not very general since we lack a precise model for the impact of the cache trashing caused by the PAS.
 Furthermore, the current implementation would require many special cases to support CPUs in non-integer quantities.
 
