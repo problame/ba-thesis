@@ -961,7 +961,7 @@ After computing a core allocation, we use it to select a target CPU on stage swi
 If a stage has been assigned multiple CPUs, the CPU with the shortest runqueue is chosen.
 Each CPU schedules its runqueue using non-preemptive round robin. \todo{evaluation / discussion}
 After a given core allocation has exceeded the boot-time-configurable \emph{maximum assignment age}, we re-evaluate the core-allocation policy using the then up-to-date stage load distribution.
-It is crucial to observe that this setup creates a feedback-loop depicted as depicted in Figure~\ref{fig:ch:di:pol:feedbackloop}:
+It is crucial to observe that this setup creates a feedback-loop depicted in Figure~\ref{fig:ch:di:pol:feedbackloop}:
 The number of cores available to a stage increases the CPU time available to its runnable threads, thereby avoiding that a single stage becomes a point of congestion.
 Among the cores of a stage, the load is evenly distributed by always choosing the CPU with the shortest runqueue for migrations.
 
@@ -996,16 +996,20 @@ When requirements change to $r'$ and we need to update the assignment to $a_{r'}
 %Therefore, we let ${r' \mathrel{+}= \floor{f}}$ and start a new iteration of the loop using ${p = norm(f - \floor{f})}$ and ${C = C - \sum_{i = 1}^{S} \floor{f}_i}$.
 %If ${\floor{f} = \begin{smallmatrix}( 0 & 0 & \dots & 0 )\end{smallmatrix}}$, we shift priorities in $p$ from lowest to highest-priority stage such that after at most $C$ iterations, all CPUs are distributed.~\todo{pseudocode?}
 
-We compute the requirements vector proportional to the current stage load distribution.
-Since we can only assign CPUs to stages in integer quantities, we only use the floored values of the exact proportional distribution.
-The remainders vector is then normalized and used as the priority vector for the next iteration of the loop.
-It can happen that no stage has enough priority to win at least one CPU.
-In those cases, we shift priority from the low-priority stage to the highest-priority stage to ensure that we make progress.
+We compute the requirements vector as follows:
+At first, we gather the current stage load of every stage and build a requirements vector proportional to the load distribution.
+To avoid jitter, we then feed this vector through exponentially-decaying moving average filter which advances every time we compute a new core assignment, thus every \lstinline[style=figurecpp]{max_assingment_age} (default: 20ms).
+By normalizing the filter result vector to the number of available CPU cores, we get an ideal floating point count of cores to be assigned to each stage.
+However, since cores can only be assigned at integer quantities, we perform element-wise integer division on the normalized vector, the divisor being the number of assignable cores.
+The integer quotient is then a vector that contains the numbers of directly assignable cores, which we add to the new requirements vector.
+The remainders vector in turn contains the left-over fractions of CPU per stage.
+We distribute the still unassigned CPU cores by repeating the above procedure with the remainders vector until all cores are assigned.
+To ensure that this loop terminates, we prioritize cores with higher fractions of CPU cores.
 The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
 
 \begin{figure}
 \centering
-\begin{minipage}{0.9\linewidth}
+\begin{minipage}{\linewidth}
 \begin{algorithmic}[1]
     \setstretch{1.22}
     % Trick with algorithmicx from https://tex.stackexchange.com/questions/113030/indentation-in-the-algorithm-package-after-ensure-require
@@ -1013,19 +1017,20 @@ The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
     \makebox[\widthof{\textbf{Require:}}][l]{\textbf{Ensure:}}}
       \Require   \begin{varwidth}[t]{\linewidth}
         \Statex ${l = \begin{pmatrix} l_1 & l_2 & \dots & l_C \end{pmatrix}}$, current stage load vector
+        \Statex ${\tilde{l} = \begin{pmatrix} \tilde{l}_1 & \tilde{l}_2 & \dots & \tilde{l}_C \end{pmatrix}}$, exp.-dec. avg. stage load vector
             \strut
                \end{varwidth}
       \Ensure      \begin{varwidth}[t]{\linewidth}
-        \Statex $r$, valid requiremnts vector
+        \Statex $r$, valid requirements vector
           \strut
                \end{varwidth}
 
-    \State $\hat{l} \gets norm(l)$ \Comment normalized load vector
-    \State ${p \gets \hat{l}}$ \Comment priority vector
+    \State $\tilde{l} \gets \alpha * l + (1 - \alpha) * \tilde{l}$ \Comment move exp.-dec. average
+    \State $p \gets \tilde{l} \big/ \Vert \tilde{l} {\Vert}_1$ \Comment norm. load, becomes first priority vector $p$
     \State $c \gets C$ \Comment number of cores left to assign
     \State $r \gets \begin{pmatrix}0 & 0 & \dots & 0\end{pmatrix}$
     \While{c > 0}
-        \State \textbf{assert} ${\sum_{i = 1}^{S} p_i = 1.0}$
+        \State \textbf{assert} ${\Vert p {\Vert}_1 == 1.0}$
         \State ${f \gets p * c}$ \Comment floating-point core count
         \If{ $\forall i \in 1 \dots S: f_i < 1.0 $ } \Comment priority shifting
             \State $i_{min} \gets \underset{s\,\in\,1 \dots S}{\text{arg\,min}} f_s$
@@ -1034,15 +1039,16 @@ The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
             \State $p_{i_{min}} \gets 0$
             \State \textbf{continue}
         \EndIf
-        \State ${r \gets r + \floor{f}}$ \Comment can only assign integer quantities
-        \State ${p \gets norm(f - \floor{f})}$ \Comment priority based on remainders
-        \State ${c \gets c - \sum_{i = 1}^{S} \floor{f}_i}$
+        \State ${r \gets r + \floor{f}}$ \Comment assign integer core counts
+        \State ${c \gets c - \Vert \floor{f} {\Vert}_1$ \Comment account for assigned cores above
+        \State ${p \gets (f - \floor{f}) \big/  \Vert f - \floor{f} {\Vert}_1 }$ \Comment priority based on remainders
     \EndWhile
 \end{algorithmic}
 \end{minipage}
 \caption{
     The algorithm to compute the requirement vector proportional to stage load.
     From the second iteration on, we distribute cores proportional to the remainders of the previous iteration.
+    Note that because ${l_i \ge 0}$, ${\Vert\cdot{\Vert}_1 = \sum_{i = 1}^{S} \vert l_i \vert = \sum_{i = 1}^{S} l_i}$.
 }
 \label{fig:di:pol:reqvectoralg}
 \end{figure}
