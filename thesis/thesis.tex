@@ -1080,40 +1080,6 @@ The idea behind choosing $C_v$ and not, for example, $C_0$, is that the core wit
 $C_v$ will least frequently switch stages and is therefore best-suited to be penalized with cache-thrashing threads from the underloaded stage.
 Validating and improving this workaround is subject for future work.
 
-\section{Limitations \& Future Work}\label{ch:di:discuss}
-\blindtext
-% big picture
-%   multi-threaded server => limits to one concurrency model (that is mostly legacy / java apps?)
-%   manual placement of migration points: unpublished work at KIT OS group works on automating that workflow
-%   migration increases data misses, so i-cache hits + benefits must outweigh them => need apps with execution phase behvaior => mathias' papermigration points at locations misses thread mandatory thread
-% sched policy details
-%   non-preemptive round robin => server tasks are I/O intensive, will thus necessarily perform blocking I/O. we could implement preemptive to be safe, but we are pretty sure the timer would never fire 
-%   policy does not do smoothing in feedback-loop => if we had more time...
-%   core allocation does not work well on idle systems => could implement adaptive scheduler, out of scope for this thesis
-
-Core allocation policy does not support SMT. Show that we need to address this explicitly, draft multi-level version of our algorithm, mention MWAIT again.
-
-We require control of the cache state, i.e. vCPUs in uncommon configuration. See Evaluation.
-This is not guaranteed in cloud hosting environments and thus limits applicability.. This is not always guaranteed in cloud hosting environment is operational burden 
-
-The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
-More elaborate discussion on design trade-offs is deferred to then end of this chapter and the evaluation.
-
-%In contrast to cohort scheduling, spreading the instruction working set over the private caches allows the code to be cache-resident for the whole time of the CPU core allocation. \todo{possible benefits of this, are there? otherwise, it's part of the break-even calc, see paper}
-%The difference to the computation spreading implementation is we do not rely on virtualization hardware features for thread migration and that we allow migration points at arbitrary points in the application instead of just the kernel boundary.
-%Unlike STEPS and the proof-of-concept, we do not supplement an unaware kernel scheduler with a user-space model but make stages a first-class concept of the scheduler instead.
-
-Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
-related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
-and demonstrated lower cache miss rates in the MySQL database server, which follows the thread-per-request model with a pool of pre-spawned threads.
-We re-use their tested stage definitions in MySQL \todo{KIT OS group} and focus on the implementation of a work-conserving scheduling policy.
-\cite{kanev2015profiling,mysqlThreading}\todo{KIT OS group}
-
-The limited compatibility with threading models is not a major limitation of our design:
-our approach aims at reaping the benefits of staged computation in legacy applications that cannot be easily refactored to a staged-computation model.
-Thread-pools and per-request threads were the dominant threading model in the last TODO years and are in fact still used in new applications today.
-We acknowledge that more recent runtimes with event-driven concurrency or M:N scheduling models are incompatible with our approach, unless programmers manually construct the supported threading models on top of them.\todo{proof}\todo{discussion section?}
-
 \subsection{OSv's Page Access Scanner}
 During the implementation of the core allocation policy we found that an OSv system thread called \emph{page access scanner} (PAS) consumes significant CPU time.
 It is unpinned (not per-cpu) and thus always executes on cpu0 in our solution because we removed the upstream scheduler's load balancing mechanism and only provide stage-aware scheduling to applications, not OSv system threads.
@@ -1183,7 +1149,7 @@ The fictional PAS-stage however would only ever have zero or one runnable thread
 Instead, it would be frequently dispatched on a random core and evict that core's stage's working set.
 Experiments showed that this option is not worth pursuing without the concept of a \emph{thrashing core}, at which point one could fully fall back to the proposal in the previous paragraph.
 
-\subsubsection{Impact on Evaluation}
+\subsubsection{Impact on Evaluation}\label{ch:di:pol:pas:eval}
 The primary goal of this thesis is to show that it is possible to implement work-conserving, stage-aware scheduling policy by choosing the right abstractions and mechanisms.
 Ideally, the corresponding scheduling policy should be competitive without further modifications to the remaining operating system.
 However, the schedule for this thesis did not allow us to solve the problems that the page access scanner poses to our scheduling policy.
@@ -1191,6 +1157,41 @@ However, the schedule for this thesis did not allow us to solve the problems tha
 As described in the previous section, the reduced frequency removes the impact on core allocation and cache thrashing, which is necessary to show the changes to cache behavior caused by our stage-aware scheduler.
 Despite the modifications to upstream OSv being technically unnecessary, we consider the comparison between the 10Hz-versions of upstream and our version of OSv to be fair, since both configurations benefit equally from the removed impact of the PAS.
 The implementation of a work-around for the PAS is thus left open to future work.
+
+
+\section{Limitations \& Future Work}\label{ch:di:discuss}
+% big picture
+%   multi-threaded server => limits to one concurrency model (that is mostly legacy / java apps?)
+%   manual placement of migration points: unpublished work at KIT OS group works on automating that workflow
+%   migration increases data misses, so i-cache hits + benefits must outweigh them => need apps with execution phase behvaior => mathias' papermigration points at locations misses thread mandatory thread
+% sched policy details
+%   non-preemptive round robin => server tasks are I/O intensive, will thus necessarily perform blocking I/O. we could implement preemptive to be safe, but we are pretty sure the timer would never fire 
+%   policy does not do smoothing in feedback-loop => if we had more time...
+%   core allocation does not work well on idle systems => could implement adaptive scheduler, out of scope for this thesis
+
+Core allocation policy does not support SMT. Show that we need to address this explicitly, draft multi-level version of our algorithm, mention MWAIT again.
+
+We require control of the cache state, i.e. vCPUs in uncommon configuration. See Evaluation.
+This is not guaranteed in cloud hosting environments and thus limits applicability.. This is not always guaranteed in cloud hosting environment is operational burden 
+
+The two most relevant are a) the opportunity cost of mandatory thread-migration when switching stages and b) data cache misses when stages share data.
+More elaborate discussion on design trade-offs is deferred to then end of this chapter and the evaluation.
+
+%In contrast to cohort scheduling, spreading the instruction working set over the private caches allows the code to be cache-resident for the whole time of the CPU core allocation. \todo{possible benefits of this, are there? otherwise, it's part of the break-even calc, see paper}
+%The difference to the computation spreading implementation is we do not rely on virtualization hardware features for thread migration and that we allow migration points at arbitrary points in the application instead of just the kernel boundary.
+%Unlike STEPS and the proof-of-concept, we do not supplement an unaware kernel scheduler with a user-space model but make stages a first-class concept of the scheduler instead.
+
+Our design is limited to server applications with high instruction cache footprint and a thread-pool or thread-per-request threading model:
+related work has shown that high instruction cache miss rates are a performance bottleneck in scale-out applications
+and demonstrated lower cache miss rates in the MySQL database server, which follows the thread-per-request model with a pool of pre-spawned threads.
+We re-use their tested stage definitions in MySQL \todo{KIT OS group} and focus on the implementation of a work-conserving scheduling policy.
+\cite{kanev2015profiling,mysqlThreading}\todo{KIT OS group}
+
+The limited compatibility with threading models is not a major limitation of our design:
+our approach aims at reaping the benefits of staged computation in legacy applications that cannot be easily refactored to a staged-computation model.
+Thread-pools and per-request threads were the dominant threading model in the last TODO years and are in fact still used in new applications today.
+We acknowledge that more recent runtimes with event-driven concurrency or M:N scheduling models are incompatible with our approach, unless programmers manually construct the supported threading models on top of them.\todo{proof}\todo{discussion section?}
+
 
 
 \chapter{Evaluation}\label{ch:eval}
@@ -1267,14 +1268,18 @@ We isolate physical cores 2 -- 7 from the Linux scheduler using the \lstinline[s
 The VM is then started with 6 virtual CPU cores (vCPUs) and we map each of the QEMU vCPU threads to one of the isolated cores in range 2 -- 7.
 The remaining QEMU threads which are used for timers, async-I/O, etc., continue to be dispatched by the Linux scheduler on cores 0 and 1.
 
-When quoting benchmarks on Linux, we refer to measurements conducted in a virtual machine running the official MySQL 5.6.38 Docker image.
-Inside the VM, we bind-mount the MySQL data directory from the ext4-formatted root partition on the emulated HDD.
-With regards to the file system, this gives the Linux VM a slight advandtage over our solution and upstream OSv because ext4 has generally lower overhead. \todo{proof}
-For all other aspects, the QEMU configuration described OSv applies.
-
 The goal of the above setup is to give the guest operating system control of the cache state of its vCPUs.
 This is required for our solution because all expected performance benefits are achieved by optimizing cache behavior.
 However, we are also unaware of any factors that would disadvantage in the comparisons made in this chapter.
+
+When quoting benchmarks on Linux, we refer to measurements conducted in a virtual machine running the official MySQL 5.6.38 Docker image.
+Inside the VM, we bind-mount the MySQL data directory from the ext4-formatted root partition on the emulated HDD.
+With regards to the file system, this gives the Linux VM a slight advandtage over our solution and upstream OSv because ext4 has generally lower overhead. \todo{proof}
+For all other aspects, the QEMU configuration described above applies.
+
+With regards to OSv, we must emphasize again we had to reduce the frequency of the \emph{page access scanner} (PAS) system thread from 1000Hz to 10Hz (see Chapter~\ref{ch:di:pol:pas:eval}).
+To maintain a fair comparison between our solution and upstream OSv with regards the metrics presented in this chapter, we applied this change to both sides.
+For all other aspects of the VM configuration, the QEMU configuration described above applies.
 
 For evaluating MySQL, we use the industry-standard TPC-C online transaction processing benchmark~\cite{tpccSpec}.
 TPC-C simulates an online transaction processing workload by modelling a retail company with warehouses and distribution districts that handles sales transactions at sales terminals.
