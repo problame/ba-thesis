@@ -288,6 +288,40 @@ Since the OS scheduler is unaware of the team lists, it may schedule a stray thr
 STEPS tries to prevent this by giving a \textquote{hint} to the scheduler to prioritize the next thread that remained in the team, but does not elaborate on the additional syscall overhead.
 By proposing a solution that is rooted in the OS's scheduler, we avoid the information loss and implementation complexities associated with STEPS's user-space approach.
 
+\section{Top-Down Performance Analysis}\label{ch:relwork:topdown}
+For the upcoming Section~\ref{ch:relwork:profiling} and the evaluation in Chapter~\ref{ch:eval}, we require some basic understanding of modern out-of-order processors and the top-down performance analysis method.
+
+Modern high-performance microprocessors employ various techniques to exploit instruction-level parallelism (ILP) and to keep all functional units of the system busy.
+\emph{Pipelining} is a very basic solution that splits the execution of an instruction into multiple phases. An instruction passes through an $N$-staged pipeline in $N * C_{max}$ clock cycles where $C_{max}$ is the number of clock cycles required for the slowest pipeline stage.
+More sophisticated \emph{superscalar} processors replicate the functional units of individual stages, enabling multiple instructions to be completed (\emph{retired}) per clock cycle.
+The dominant technique to manage this pipeline is called \emph{dynamic pipeline scheduling} where it is the job of the hardware instead of the software and compiler to optimally supply functional units with work.
+Further techniques to exploit ILP are branch prediction and speculative execution.~\cite{hennessy2002DynamicPipeline}.
+
+In any way, the above architecture is barely comparable to the classical model of a single-issue pipeline.
+The terminology used in by Intel to describe their micro-architectures therfore refers to
+an \emph{instruction fetch unit} that decodes the incoming instruction stream into micro-operations (uops),
+an \emph{out-of-order execution engine} that executes those uops on functional units and
+an \emph{in-order retirement} unit that ensures that the effects of the issued instructions appear in program order.~\cite{intelArchPipeline}.
+
+\citeauthor{yasinTopdown}~\cite{yasinTopdown} further abstract this view by defining the
+\emph{frontend} as the part of the CPU being responsible for fetching instructions, decoding them to uops and supplying them to the \emph{backend}.
+The \emph{backend} in turn is in charge of fetching operands, scheduling uops on the functional units and retiring instructions in program-order.
+The authors present the \textbf{top-down} performance anlysis method, which helps to identify micro-architectural bottlenecks by classifying CPU time into categories that are organized in a nested tree.
+When applying the method, one traverses the tree top-down, usually following those categories marked with the highest percentage of spent CPU time.
+The data source for the classification are performance counters which are built into to the CPU and are accessible by software.
+
+For this thesis, we will focus on the \emph{top-level breakdown}, i.e., the highest level of the top-down hierarchy.
+The categories at this level are \emph{Retiring}, \emph{Bad Speculation}, \emph{Backend-Bound} and  \emph{Frontend Bound}.
+While the first two categories indicate that actually or at least potentially useful work was done, the latter two categories classify those pipeline slots lost due to microarchitectual bottlenecks:
+Backend-bound cycles do not perform useful work because operations in the backend take exceptionally long, thereby introducing \emph{bubbles} into the execution pipeline.
+Examples for this category may be a sub-optimal instruction mix or d-cache misses on uop-operands.
+In contrast, frontend-bound cycles do not perform useful work because the backend is undersupplied with uops.
+For example, i-cache misses will cause no instructions to be decoded and thus no uops to be issued for execution.~\cite{yasinTopdown,intelVtuneHelpRef,intelArchPipeline}
+
+In this thesis, we optimize i-cache behavior by partitioning the instruction working set.
+Reducing the percentage of frontend-bound cycles is thus used as a success metric.
+
+
 \section{Profiling Datacenter Applications}\label{ch:relwork:profiling}
 % alread shown that it's a problem in DBMSs, see 'affinity scheduling harizopoulos introduction' and the Steps paper (p3)
 % dominant are the d-cache misses, but i-cache misses are also significantly higher than usual 
