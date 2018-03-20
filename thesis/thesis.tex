@@ -1015,11 +1015,11 @@ Lastly, an update should be minimal in the number of cores that switch to anothe
 
 Our implementation is based around the \emph{assignment} data structure which represents a concrete mapping of CPU cores to stages, and the \emph{requirement vector}, which only specifies the number of cores to be assigned to each stage.
 On a system with $C$ cores and $S$ stages, a requirement is a vector
-    \[ r = \begin{pmatrix} r_1 & r_2 & \dots & r_S \end{pmatrix} \left\text{where}\right r_i \in \mathbb{N}_0 \left \text{and} \right \sum_{i = 1}^{S} r_i  = C. \]
+    \[ r = \begin{pmatrix} r_1 & r_2 & \dots & r_S \end{pmatrix}\ \text{where}\ r_i \in \mathbb{N}_0 \ \text{and}\  \sum_{i = 1}^{S} r_i  = C. \]
 It is important to emphasize that the components of $r$ must be integers, because CPU cores can only be assigned in integer quantities.
 A valid assignment $a_r$ derived from $r$ then maps each of the $C$ cores to exactly one stage:
-    \[ a_{r} = \begin{pmatrix} a_1 & a_2 & \dots & a_C \end{pmatrix} \wedge \forall s \in 1 \dots S : \vert\{\left i : a_i = s \right \} \vert = r_s \]
-When requirements change to $r'$ and we need to update the assignment to $a_{r'}'$, our goal must then be to minimize ${\vert\{\left i : a_i' \ne a_i \right\}\vert}$ because this is the number of cores that incurs capacity i-cache misses due to change of the executed instruction working set partition.
+    \[ a_{r} = \begin{pmatrix} a_1 & a_2 & \dots & a_C \end{pmatrix} \wedge \forall s \in 1 \dots S : \vert\{\, i : a_i = s \, \} \vert = r_s \]
+When requirements change to $r'$ and we need to update the assignment to $a_{r'}'$, our goal must then be to minimize ${\vert\{\, i : a_i' \ne a_i \,\}\vert}$ because this is the number of cores that incurs capacity i-cache misses due to change of the executed instruction working set partition.
 
 %We compute the requirements vector periodically using the following algorithm:
 %Given the current stage load ${l = \begin{smallmatrix}( l_1 & l_2 & \dots & l_C )\end{smallmatrix}}$, we normalize this vector to $\hat{l}$ such that ${\sum_{i = 1}^{S} \hat{l}_i = 1.0}$.
@@ -1073,7 +1073,7 @@ The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
             \State \textbf{continue}
         \EndIf
         \State ${r \gets r + \floor{f}}$ \Comment assign integer core counts
-        \State ${c \gets c - \Vert \floor{f} {\Vert}_1$ \Comment account for assigned cores above
+        \State ${c \gets c - \Vert \floor{f} {\Vert}_1}$ \Comment account for assigned cores above
         \State ${p \gets (f - \floor{f}) \big/  \Vert f - \floor{f} {\Vert}_1 }$ \Comment priority based on remainders
     \EndWhile
 \end{algorithmic}
