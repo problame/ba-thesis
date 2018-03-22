@@ -125,22 +125,24 @@ Therefore, we explore techniques that explicitly target symmetric multi-core sys
 Experimental work at the KIT OS group combines computation spreading with the idea of staged computation, resulting in a solution where
 application developers manually partition their code into stages and inserts one-line stage switching calls into the request handling code path.
 By dedicating CPU cores to stages and migrating threads between the cores on stage switch, the request handler's instruction working set is spread over the private caches of these cores.
-A proof-of-concept implementation in Linux and the MySQL database management system shows that i-cache misses and branch-misprediction rates can be reduced by X and Y\%.
-However, experiments with multiple concurrent requests show that the prototype is not work-conserving on multi-core systems.\todo{data}
+A proof-of-concept implementation in Linux and the MySQL database management system shows that for a single concurrent client, L2 cache misses can be reduced by up to 40\%, correlating with up to 17\% increased throughput.
+However, for more than one client and for increased core counts, the achieved throughput is up to 40\% lower compared to running on standard Linux.
+The proof-of-concept is thus clearly not work-conserving, but shows the potential gains achievable by spreading a server's instruction working set over the private caches of all available CPU cores.
 
-In this thesis, we show that proper OS abstractions enable reaping the benefits of staged computation on modern SMP systems while requiring minimal customization effort to legacy applications.
+In this thesis, we present a stage-aware thread scheduler that sustains the performance improvements achieved by instruction working set spreading at a high number of concurrent clients and multiple CPU cores.
+Our solution requires minimal customization efforts for adoption in multi-threaded servers, making it particularly attractive for large legacy codebases that cannot be easily refactored to support more efficient concurrency models.
 Specifically, our contributions are as follows:
 \begin{itemize}
     \item We analyze the design aspects that make the early 2000's approaches of cohort scheduling and STEPS inapplicable to SMP systems.
     \item We analyze the design and implementation of the aforementioned proof-of-concept implementation at the KIT OS group and point out why it is not work-conserving.
     \item We present a user-space C++ API for applications to manually define stages and stage switching points in the request-handling code path.
     \item We present the design and implementation of a work-conserving scheduling policy that allocates CPUs to stages and migrates threads as necessary to preserve warm instruction-caches.
-    \item We show the practical applicability of our solution in MySQL, resulting in 22\% increased throughput and a 65\% reduction in i-cache misses.
+    \item We show the practical applicability of our solution in MySQL, resulting in 22\% increased throughput and a 65\% reduction in L2 i-cache misses.
 \end{itemize}
 
 The remainder of this thesis is structured accordingly.
-In Chapter~\ref{ch:relwork}, we examine preceding work in the area of staged computation, including an analysis of their applicability to multi-core  systems.
-Chapter~\ref{ch:analysis} describes the KIT OS group's proof-of-concept implementation and points out why the design is not work conserving.
+In Chapter~\ref{ch:relwork}, we examine preceding work in the area of high-performance network server design.
+Chapter~\ref{ch:analysis} describes the design of the KIT OS group's proof-of-concept, pointing out why it is not work-conserving.
 Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our solution in the OSv library operating system.
 Finally, we evaluate our implementation in Chapter~\ref{ch:eval} by applying it to MySQL and showing that our design decisions have their intended effects.
 
@@ -478,13 +480,12 @@ Figure~\ref{fig:kit_os_poc_blocking} visualizes this situation.
     \label{fig:kit_os_poc_blocking}
 \end{figure}
 
-The authors evaluate their system using TPC-C benchmark on Linux 4.13, comparing upstream MySQL 5.6.38 with a version extended with stage switching points.
+The authors evaluate their system using the TPC-C benchmark, comparing throughput and cache behavior of a modified version of MySQL 5.6.38 against an umodified version as a baseline.
 %Thethat and \emph{stagified} version of MySQL 5.6.38 running on an SMP system with X cores.
-The expected reductions of i-cache and mispredicted branches are achieved in the modified version, but the speedup in throughput is dependent on the number of concurrent requests:
-Taking upstream as baseline (100\%), throughput with a single TPC-C terminal is 8.6\% higher in the modified version.
-However, for multiple terminals and thus multiple concurrent clients, throughput only increases up to a factor of the number of stages.~\todo{check}
-The proof-of-concept is thus clearly not work-conserving on SMP systems, which we will investigate in the next chapter.
-\todo{data}
+For a single client and low core counts, they observe the expected 40\% reduction in L2 cache misses, correlating with a 17\% speedup in throughput.
+However, for both an increased number of concurrent clients and a higher number of CPU cores, throughput is 10 -- 40\% below baseline.
+Additionally, L2 miss rates and achieved throughput do not correlate with more than one concurrent client.
+In the next chapter, we present our analysis of the reason behind this behavior.
 
 \chapter{Analysis}\label{ch:analysis}
 Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
