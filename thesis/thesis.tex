@@ -120,13 +120,13 @@ A derivative of cohort scheduling has been implemented in a research DBMS under 
 
 Despite the promising results of above research, the concepts have found little adoption in popular database management systems such as MySQL, which uses thread-based concurrency (one handler per request) with a pre-spawned pool of handler threads.~\cite{mysqlThreading}.
 Furthermore, we will show that design decisions of the above solutions should be revisited for today's SMP systems.
-Therefore, we explore techniques that explicitly target multi-processor systems.
+Therefore, we explore techniques that explicitly target symmetric multi-core systems.
 \emph{Computation spreading} is a technique that splits the working set of thread at the user-kernel-boundary by executing OS code on different cores than user-level code, thus making use of the private caches more effectively.
 Experimental work at the KIT OS group combines computation spreading with the idea of staged computation, resulting in a solution where
 application developers manually partition their code into stages and inserts one-line stage switching calls into the request handling code path.
 By dedicating CPU cores to stages and migrating threads between the cores on stage switch, the request handler's instruction working set is spread over the private caches of these cores.
 A proof-of-concept implementation in Linux and the MySQL database management system shows that i-cache misses and branch-misprediction rates can be reduced by X and Y\%.
-However, experiments with multiple concurrent requests show that the prototype is not work-conserving on multi-processor systems.\todo{data}
+However, experiments with multiple concurrent requests show that the prototype is not work-conserving on multi-core systems.\todo{data}
 
 In this thesis, we show that proper OS abstractions enable reaping the benefits of staged computation on modern SMP systems while requiring minimal customization effort to legacy applications.
 Specifically, our contributions are as follows:
@@ -139,7 +139,7 @@ Specifically, our contributions are as follows:
 \end{itemize}
 
 The remainder of this thesis is structured accordingly.
-In Chapter~\ref{ch:relwork}, we examine preceding work in the area of staged computation, including an analysis of their applicability to multi-processor systems.
+In Chapter~\ref{ch:relwork}, we examine preceding work in the area of staged computation, including an analysis of their applicability to multi-core  systems.
 Chapter~\ref{ch:analysis} describes the KIT OS group's proof-of-concept implementation and points out why the design is not work conserving.
 Subsequently, Chapter~\ref{ch:di} presents the design and implementation of our solution in the OSv library operating system.
 Finally, we evaluate our implementation in Chapter~\ref{ch:eval} by applying it to MySQL and showing that our design decisions have their intended effects.
@@ -152,7 +152,7 @@ This chapter starts with an overview of the prevalent concurrency models in the 
 We proceed with an introduction to \emph{cohort scheduling}, \emph{staged computation} and \emph{staged event-driven architecture} which stem from the same time period
 and present \emph{STEPS}, which applies above concepts to a research database management system, showing that these software-only solutions lead to performance improvements due to reduced i-cache misses and better branch prediction.
 Despite these in research systems, large-scale profiling at Google from 2015 shows that the memory hierarchy in contemporary processors is still sub-optimal for typical datacenter applications.
-Given that the above approaches targeted single-core machines from the early 2000s, we take a step back and analyze their applicability to today's multi-processor systems and memory hierarchies,
+Given that the above approaches targeted single-core machines from the early 2000s, we take a step back and analyze their applicability to today's multi-core systems and memory hierarchies,
 coming to the conclusion that major redesigns are required in order to provide work-conserving solutions.
 Motivated by the ongoing relevance of the topic and a changed hardware landscape, we explore \emph{computation spreading}, a technique that explicitly targets SMP systems and uses thread migration to spread the instruction working set of a thread over multiple CPU cores.
 We conclude this chapter with a proof-of-concept implementation at the KIT OS group which extends computation spreading to arbitrary split points within user-level code, forming the basis for this thesis.
@@ -369,7 +369,7 @@ Looking at the related work presented so far, we conclude that for more than 15 
 \section{Interim: Applicability to SMP Systems}\label{ch:relwork:anasmp}
 Cohort scheduling, SEDA and STEPS were all evaluated on single-core machines.
 Adaption to multi-core systems is not mentioned at all or stays theoretical.~\cite{steps,harizopoulos2003case}
-Given today's ubiquitous multi-processors and the ongoing relevance of high i-cache footprints, re-examining the applicability of the above approaches seems appropriate.
+Given today's ubiquitous multi-core systems and the ongoing relevance of high i-cache footprints, re-examining the applicability of the above approaches seems appropriate.
 
 \subsection{Private Caches}
 % All numbers by example: My Haswell against STEPS CPU
@@ -379,7 +379,7 @@ Given today's ubiquitous multi-processors and the ongoing relevance of high i-ca
 % today's L1 is split 32KiB i- and d-cache, early 2000s L1 64KiB (shared / unified?)  
 % proof that today's chips are multicore: begin sodaspr
 The single-core machines used to evaluate cohort scheduling, SEDA and STEPS feature a small L1 cache and a larger, higher-latency L2 cache.
-However, contemporary symmetric multi-processors typically have a \emph{private} L1 and L2 caches and a \emph{shared} L3 cache.
+However, contemporary symmetric multi-core systems typically have a \emph{private} L1 and L2 caches and a \emph{shared} L3 cache.
 The capacities of L1 and L2 are comparable to the early 2000s' models and the access latency between L1, L2 and L3 increases by a factor of 3 -- 4 between each level.
 However, L2 instruction misses can typically not be compensated by out-of-order processing.~\cite{hennessy2002,haswellCacheLatency} %hennessy print page 509
 
@@ -406,9 +406,9 @@ This is obviously not work-conserving on multi-core systems, requiring additiona
 On a busy system, one could also argue that enough threads are available to simply employ cohort-scheduling per core.
 However, in contrast to the approach of \emph{computation spreading} presented in the next section, this replicates to each core the repeated capacity misses when a team moves to the next step.
 
-The above assessment shows that cohort scheduling, SEDA and STEPS cannot be directly applied to today's multi-processor systems.
+The above assessment shows that cohort scheduling, SEDA and STEPS cannot be directly applied to today's multi-core systems.
 The availability of private caches per core must be accounted for and new requirements such as load balancing between cores must be addressed.
-However, given the ongoing relevance of the problems identified more than 15 years ago, we continue this chapter by investigating publications that explicitly target multi-processor systems.
+However, given the ongoing relevance of the problems identified more than 15 years ago, we continue this chapter by investigating publications that explicitly target multi-core systems.
 
 \section{Computation Spreading}\label{ch:relwork:compspr}
 % TODO: related and actually more relevant to our approach: Computation Spreading
