@@ -58,6 +58,12 @@
   alsodigit={:},
 }
 
+\usepackage{hyperref}
+\NewDocumentCommand{\gitcommit}{m}{\texttt{\StrLeft{#1}{8}}}
+\NewDocumentCommand{\gitbranch}{m}{\texttt{#1}}
+\NewDocumentCommand{\gitrepo}{m}{\texttt{#1}}
+\NewDocumentCommand{\refosvcommit}{m}{\href{https://github.com/problame/ba-osv/commit/#1}{\gitcommit{#1}}}
+
 \NewDocumentCommand{\evalfigpath}{m}{fig_build/evaluation/#1}
 
 \widowpenalty100000
@@ -755,6 +761,8 @@ req sql::parse(buf& b) {
 \label{fig:di:api:examplestack}
 \end{figure}
 
+The commits in the Git repository corresponding to the changes presented in this section are \refosvcommit{439b55014ea8d3285db7523c4c1ba02b4948cd41} and \refosvcommit{9eaf3a8b9aa5a18a5a79920066803a5a84d3b6c5}.
+
 \section{Fast Thread Migration}\label{ch:di:mig}
 % Motivation: Stage switch requires migration to other core
 % Existing migration mechanism is based on IPIs, is too slow => results, maybe also compare to Linux => adjust hopper
@@ -860,6 +868,8 @@ We solved this problem by also setting upstream mechanism's bitmask from the sta
 Combined with the changes we present in the next Section, we recommend to merge the two queues and migration strategies and to de-duplicate the dequeuing code.
 \todo{out of place?}
 
+The commits in the Git repository corresponding to this section are \refosvcommit{439b55014ea8d3285db7523c4c1ba02b4948cd41} and \refosvcommit{f00b587267797a0bc887243d8cbca661426c8e0b}.
+
 \section{Thread Migration on Wake-Up}\label{ch:di:wake}
 % Motivation: with thread migration mechanism in place, we are faster than the Linux solution but not still work conserving
 %             when a thread is woken up, it will be enqueued inot the runqueue of the CPU where it went to sleep
@@ -959,6 +969,8 @@ The waker can then follow the steps described above.
 While the source CPU will incur a spurious timer interrupt, we fully avoid all overhead associated with the original helper thread.
 
 After these substantial refactorings, we finally have an efficient way to perform remote asynchronous thread migration in the context of the waker and thus immediately dispatch a woken thread on a suitable CPU core according to the current core allocation.
+
+The relevant commits for this section are \refosvcommit{80d619a810b1e768c49c1acb89ebfbb8a31ecacd} and \refosvcommit{7df1b22f57b8ba90abb4658117599d06620c900a} (state spreading), \refosvcommit{13fbe6743921d9c8308b823a2bb8e21584a09df1} (remotely suspend timers) and \refosvcommit{ed043e94efee8dc4a532f51a46c4a86e7f28778b} (thread migration on wake-up).
 
 \section{Core Allocation Policy}\label{ch:di:pol}
 % remove load balancing + fairness (cpu time, priority queue / sorted list? )
@@ -1139,6 +1151,9 @@ If a stage is constantly underloaded, the stage-switching points were likely not
 The idea behind choosing $C_v$ and not, for example, $C_0$, is that the core with the highest index is already advantaged in the \emph{minimal transition} algorithm:
 $C_v$ will least frequently switch stages and is therefore best-suited to be penalized with cache-thrashing threads from the underloaded stage.
 Validating and improving this workaround is subject for future work.
+
+The initial implementation of the allocation algorithm was commited in revision \refosvcommit{2f2a8628bc927e41d1e194b8495c84eda82b55ef} and refined in \refosvcommit{cf16063beef7573026a543e0ad68dace6a3eff89}.
+The requirements vector is computed as described above since revision \refosvcommit{1d3b25957985eb929e26dd956fb038ca6ec71073}.
 
 \subsection{OSv's Page Access Scanner}
 During the implementation of the core allocation policy we found that an OSv system thread called \emph{page access scanner} (PAS) consumes significant CPU time.
