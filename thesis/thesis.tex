@@ -478,8 +478,8 @@ Figure~\ref{fig:kit_os_poc_blocking} visualizes this situation.
 
 The authors evaluate their system using TPC-C benchmark on Linux 4.13, comparing upstream MySQL 5.6.38 with a version extended with stage switching points.
 %Thethat and \emph{stagified} version of MySQL 5.6.38 running on an SMP system with X cores.
-The expected reductions of i-cache and mispredicted branches are achieved in the stagified version, but the speedup in throughput is dependent on the number of concurrent requests:
-Taking upstream as baseline (100\%), throughput with a single TPC-C terminal is 8.6\% higher in the stagified version.
+The expected reductions of i-cache and mispredicted branches are achieved in the modified version, but the speedup in throughput is dependent on the number of concurrent requests:
+Taking upstream as baseline (100\%), throughput with a single TPC-C terminal is 8.6\% higher in the modified version.
 However, for multiple terminals and thus multiple concurrent clients, throughput only increases up to a factor of the number of stages.~\todo{check}
 The proof-of-concept is thus clearly not work-conserving on SMP systems, which we will investigate in the next chapter.
 \todo{data}
@@ -569,6 +569,7 @@ Reading from and writing to the network socket form one stage because these oper
 Once the stages are defined, a request-handler thread must switch to the appropriate stage before performing the next step of request-handling.
 In concrete terms, this means that developers must call a system API in the request-handling code path.
 In the example above, a \textit{\textsc{select}} request would result in the following switch series: $S_n$, $S_{ser}$, $S_{INS}$, $S_{ser}$, $S_n$.
+For the rest of this thesis, we will refer to an application that uses the stage API as described above as a \emph{stagified} application.
 
 %%From an application developer's perspective, we provide a system API allowing to define \emph{stages} on program start and switch a thread as objects and to switch the current thread between them.
 %%Stages represent ideally disjoint instruction working sets, each fitting into the private cache of a CPU core.
@@ -577,8 +578,9 @@ In the example above, a \textit{\textsc{select}} request would result in the fol
 %%In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
 %%Before calling \texttt{read} or \texttt{write} on the network socket, the developer would then switch to the network-stack-stage.
 
-Given such a \emph{stagified} application, we then track per thread the association to its current stage in the TCB and per stage the number of threads runnable threads currently associated with it.
-We use this information to periodically compute the \emph{current core allocation}, which assigns CPU cores to stages proportional to the stages' load.
+Our scheduler tracks a thread's assiciation to its current stage in the thread's TCB.
+Additionally, it tracks per stage the number of runnable threads associated with it.
+We then use this information to periodically compute the \emph{current core allocation}, which assigns CPU cores to stages proportional to the stages' load.
 A core is thus always allocated to exactly one stage. % however, a stage may not have any dedicated cores. only tell that in the details section
 The scheduler then implements the following guiding principle: \textbf{A thread is only dispatched on cores that are allocated to the thread's current stage}.
 When a thread uses the system API to switch to a stage $S$, we choose the least-loaded core $C$ among the cores allocated to $S$ and enqueue the switching thread into $C$'s runqueue.
@@ -1782,7 +1784,7 @@ As a baseline, we use our version of OSv with fixed core allocation with two ded
 We continue to use the length of the runqueue to decide on which core within a stage a thread should be dispatched.
 We use the TPC-C benchmark with a varying number of terminals to evaluate MySQL performance and concurrently capture L2 metrics on the vCPUs.
 Additionally, we perform two separate runs with MWAIT vs. busy-waiting in the idle thread.
-The comparison between fixed core allocation and the core allocation policy is fair with regards to available CPU resources because our stagified version of MySQL uses exactly 3 stages, resulting in two dedicated stages per core.
+The comparison between fixed core allocation and the core allocation policy is fair with regards to available CPU resources because we define exactly 3 stages for MySQL, resulting in two dedicated cores per stage.
 
 As is visible in Figure~\ref{fig:eval:capperf:table}, the maximum increase in throughput achieved by the core allocation policy is only 3\%, starting at 25 TPC-C terminals and higher.
 Additionally, these 3\% are only reached when using busy-waiting --- the speedup with MWAIT is at most 2\%.
