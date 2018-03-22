@@ -860,7 +860,7 @@ First, the idle thread can busy-wait for changes to the incoming migrations queu
 Alternatively, it can use the \textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions to wait for changes to the queue while keeping the core into a low power state.
 Both options have benefits and downsides:
 Busy-waiting offers 16\% lower migration latency (see Section~\ref{ch:eval:mig}) but consumes more power, which is undesirable for technical (dark silicon), economical (increased cost) and ecological reasons.
-MWAIT in combination with SMT in contrast allows the core to switch to another hardware thread, which also opens a window for increased performance.~\cite{intelSDMMWAIT,darkSilicon}
+MWAIT in combination with \emph{simultaneous multithreading} (SMT) in contrast allows the core to switch to another hardware thread, which also opens a window for increased performance.~\cite{intelSDMMWAIT,darkSilicon}
 %Since our core allocation policy currently does not support SMT \todo{ref limitations / related work} ...
 
 At last, we want to provide some implementation details that we omitted for easier understanding of the design:
@@ -1297,9 +1297,8 @@ We conclude with a discussion of the results in Section~\ref{ch:eval:discuss}.
 % Disabled L2 Prefetching 0x3 to MSR 0x1a4
 
 % TPC-C number of warehouses
-We evaluate our solution on a single-socket Intel Xeon E5-2618L v3 CPU.
-The system supports simultaneous multi-threading (SMT) with 8 cores, 2 hardware threads each.
-The system has 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMs clocked at 2133Mhz.
+We evaluate our solution on a single-socket Intel Xeon E5-2618L v3 CPU --- a Simultaneous multithreading (SMT) system with with 8 cores, 2 hardware threads each.
+The system is equipped with 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMs clocked at 2133Mhz.
 The CPU's cache hierarchy consists of a 20MiB shared, inclusive, 20-way set associative L3 cache, private unified 256KiB L2 caches and private separate 32KiB L1-d and L1-i caches.
 All private caches are 8-way set-associative.
 Via the BIOS, we disable SMT because the core allocation policy does not support it (see Section~\ref{ch:concl:fw}).
@@ -1891,7 +1890,7 @@ Third, our scheduler could be extended to program performance-counters during ru
 Additionally, server applications could inform the scheduler about request completions.
 Given a mathematical model of the opportunity cost of thread migration, the scheduler could then use the feedback from above data sources as input to the core allocation algorithm.
 
-Finally, the core allocation policy should be extended to support SMT:
+Finally, the core allocation policy should be extended to support simultaneous multithreading:
 The hardware threads of an SMT-enabled CPU are commonly exposed to the operating system as separate logical CPU cores.
 The corresponding topology information, i.e., which of these logical cores belong to which physical cores, can be obtained through corresponding instructions.
 Since logical cores share the private cache of the physical core, the core allocation policy would need to assert that all logical cores of a physical core are assigned to the same stage to prevent i-cache thrashing.
