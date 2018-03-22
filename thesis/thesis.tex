@@ -125,7 +125,7 @@ Therefore, we explore techniques that explicitly target multi-processor systems.
 Experimental work at the KIT OS group combines computation spreading with the idea of staged computation, resulting in a solution where
 application developers manually partition their code into stages and inserts one-line stage switching calls into the request handling code path.
 By dedicating CPU cores to stages and migrating threads between the cores on stage switch, the request handler's instruction working set is spread over the private caches of these cores.
-A proof-of-concept implementation in Linux and the MySQL database management system show that i-cache misses and branch-misprediction rates can be reduced by X and Y\% respectively while keeping the modifications in MySQL to a total of just Z lines.
+A proof-of-concept implementation in Linux and the MySQL database management system shows that i-cache misses and branch-misprediction rates can be reduced by X and Y\%.
 However, experiments with multiple concurrent requests show that the prototype is not work-conserving on multi-processor systems.\todo{data}
 
 In this thesis, we show that proper OS abstractions enable reaping the benefits of staged computation on modern SMP systems while requiring minimal customization effort to legacy applications.
@@ -409,7 +409,6 @@ However, in contrast to the approach of \emph{computation spreading} presented i
 The above assessment shows that cohort scheduling, SEDA and STEPS cannot be directly applied to today's multi-processor systems.
 The availability of private caches per core must be accounted for and new requirements such as load balancing between cores must be addressed.
 However, given the ongoing relevance of the problems identified more than 15 years ago, we continue this chapter by investigating publications that explicitly target multi-processor systems.
-\todo{s/multi-processor/multi-core/?}
 
 \section{Computation Spreading}\label{ch:relwork:compspr}
 % TODO: related and actually more relevant to our approach: Computation Spreading
@@ -1297,8 +1296,8 @@ The system supports simultaneous multi-threading (SMT) with 8 cores, 2 hardware 
 The system has 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMs clocked at 2133Mhz.
 The CPU's cache hierarchy consists of a 20MiB shared, inclusive, 20-way set associative L3 cache, private unified 256KiB L2 caches and private separate 32KiB L1-d and L1-i caches.
 All private caches are 8-way set-associative.
-We disable SMT via the BIOS because our core allocation policy does not support it. \todo{ref}
-Furthermore, we disable all C-states to reduce latency spikes.
+Via the BIOS, we disable SMT because the core allocation policy does not support it (see Section~\ref{ch:concl:fw}).
+We also disable automatic switching to lower C-states to remove latency jitter.
 
 We use the Fedora 27 Linux distribution with Linux kernel version 4.13.9 (Fedora package \lstinline[style=figurecpp]{4.13.9-300.fc27.x86_64}) as the machine operating system.
 We remove the measurement noise caused by dynamic voltage and frequency scaling by setting the scaling governor to \lstinline[style=figurecpp]{performance} mode and disabling the \lstinline[style=figurecpp]{turbo} frequency range.
@@ -1468,13 +1467,13 @@ git diff --stat 38e2b4d1fe7564b8e1a0d0f0eeb7f542d0d534b6
 \end{figure}
 
 However, there are a number of obvious points for criticism in the above approach:
-At first, the cache-simulator-based switching points are located at semantically unintuitive positions in the source code.
+First, the cache-simulator-based switching points are located at semantically unintuitive positions in the source code.
 Thus, while the patch is small in size, a human developer can only port it across patch-levels of a given version of MySQL, hoping that the instruction working set does not change significantly.
-For a new minor or major version, a one-time re-run of the simulation process would thus be required. \todo{comment on this?}
-Secondly, the patches are specific to the simulated cache hierarchy, requiring ready-to-run images to be built per targeted CPU.
+We expect new major versions to require a one-time r-rerun of the simulation process.
+Second, the patches are specific to the simulated cache hierarchy, requiring ready-to-run images to be built per targeted CPU.
 While this approach is prohibitive for fragmented setups, we expect the targeted medium to large-scale deployments to use homogeneous hardware, facilitating deployment.
 Additionally, it should be noted that the very popular Intel x86-64 micro-architectures since \emph{Nehalem} (2008) have used the same cache sizes and associativity per core, although \emph{Skylake} server processors have moved form 256KiB to 1MiB L2 cache in 2017~\cite{nehalemCacheHierarchy,skylakeServerCacheHierarchy}.
-Lastly, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
+At last, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
 Indeed, we can imagine a lot of improvements to the tooling but leave this subject to future work.
 
 \section{Whole-System Benchmark with MySQL}\label{ch:eval:perf}
@@ -1867,7 +1866,7 @@ The scheduler dispatches a thread in a particular stage only onto those cores th
 This enables threads to benefit from always-warm i-caches.
 The evaluation has shown that our fast thread migration mechanisms and the integration of our policy into the wake-up mechanisms are the main contributors for increased application performance and multi-core scalability of the concept.
 
-\section{Future Work}
+\section{Future Work}\label{ch:concl:fw}
 
 We have already discussed the limitations of the evaluation in Section~\ref{ch:eval:discussion}.
 However, there is also room for improvement in the general design.
