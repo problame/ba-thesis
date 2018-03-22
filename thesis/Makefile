@@ -40,7 +40,11 @@ $(FIG_DOT_PDF): fig_build/%.pdf: fig_build fig/%.dot
 
 ## targets
 
-all: $(FIG)
+.PHONY: copyevaluation
+copyevaluation: fig_build
+	rsync -a evaluation/processed/ fig_build/evaluation/
+
+all: $(FIG) copyevaluation
     #nop
 
 clean:

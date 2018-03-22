@@ -1,0 +1,16 @@
+
+worker: 10.23.42.40:22345
+
+mysqlcommand : ["./osv.sh", "../../blobs/whole_system/upstream_eval_base_v0.24-471-g3ba2daa5.img", "2-7", "--idle_nospin=0 --idle_empty_strategy=1"]
+perfcommand: ["bash", "-c", "sleep 30d"]
+
+tpcc:
+    seconds: 40
+    terminals: 1
+    scalefactor: 2
+    mysql:
+        host: 10.23.42.10
+        port: 3306
+        user: root
+        password: ""
+        db: tpcc

@@ -1,0 +1,16 @@
+
+worker: 10.23.42.40:22345
+
+mysqlcommand : ["./osv.sh", "../../blobs/whole_system/mine_last.img", "2-7", "--stage.fixed_cpus_per_stage=2 --stage.max_assignment_age=5000000 --idle_mwait=0"]
+perfcommand: [ "./perf.sh", "ref-cycles cpu_clk_unhalted.thread idq_uops_not_delivered.core uops_issued.any uops_retired.retire_slots int_misc.recovery_cycles l2_rqsts.all_code_rd l2_rqsts.code_rd_miss l2_rqsts.miss l2_rqsts.references", "ukHG", "2-7" ]
+
+tpcc:
+    seconds: 40
+    terminals: 60
+    scalefactor: 2
+    mysql:
+        host: 10.23.42.10
+        port: 3306
+        user: root
+        password: ""
+        db: tpcc
