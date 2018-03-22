@@ -1926,12 +1926,39 @@ We expect the performance impact of MWAIT to be at least mitigated by the above,
 \backmatter
 
 \chapter{Appendix}
-\blindtext
+
+This thesis was submitted with a digital copy of our implementation, benchmarking tools and supplemental utility scripts.
+To facilitate navigation in the material, we provide the the following overview.
+
 \begin{itemize}
-    \item Source code and commit history of our modified version of OSv
-    \item Source code and commit history of our modified version of MySQL 5.6
-    \item Source code and commit history of our microbenchmarks and measurement scripts
-    \item Evaluation Hardware Memory Hierarchy Topology Information
+    \item \textbf{OSv versions}:
+        Available as branches in the \gitrepo{ba-osv} repository.
+    \begin{itemize}
+        \item \textbf{The implementation ouf our solution:}
+            The version that we used for our evaluation is \gitcommit{b18d6af850cf7068faeb5c4e1c578299a20b5f3d} which is HEAD of the \gitbranch{stage}.
+        \item \textbf{Upstream OSv}
+            For using upstream OSv as a baseline the evaluation, we made several changes.
+            \begin{itemize}
+                \item The baseline with page access scanner frequency 10Hz and configurable idle strategy is \gitcommit{7b853491f0eed682edcde91350f20bfcd06e76a2} which is HEAD of the \gitbranch{eval\_upstream} branch.
+
+                \item The additional implementation of the stage API on top of the upstream primitives is \gitcommit{bf6ed9ac51aa30bcf989796fb4597979f66b6581} which is HEAD of the \gitbranch{eval\_upstream\_threadmig}
+            \end{itemize}
+    \end{itemize}
+
+    \item \textbf{Micro-Benchmark and MySQL OSv ports.}
+        They are used by all of the above versions and are thus located in the \gitrepo{ba-osv-apps} (HEAD of \gitbranch{master} branch).
+        The OSv versions use submodules to include this repository.
+
+    \item \textbf{The tool we wrote to coordinate the benchmark execution.}
+        We call it \texttt{doltp}, it is responsible for starting the VM, starting perf, starting \texttt{oltpbenchmark} on the remote machine, etc.
+        It is available in the \gitrepo{ba-doltp} repository and has all library dependencies in the \texttt{vendor} directory.
+
+    \item \textbf{The scripts to perform the benchmark runs, the raw result data and the IPython notebook used to render the evaluation figures.}
+        It is located in the same repository as the \latex sources for this thesis, in the \texttt{thesis/evaluation}.
+
+    \item \textbf{Details on the hardware used for the evaluation.}
+        We provide the output of some standard hardware information tools in the \texttt{thesis/evaluation/hw} directory, along with the shell script to generate the output.
+
 \end{itemize}
 
 \cleardoublepage
