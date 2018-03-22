@@ -170,9 +170,9 @@ The request handlers are thus commonly I/O bound.~\cite{seda}
 
 I/O \emph{hardware} interfaces are asynchronous, allowing the CPU to perform useful work while the slow I/O operation completes.
 However, the traditional \emph{software} abstractions exposed by the operating system are synchronous:
-processes or threads that \emph{block} on I/O operations are preempted from the CPU and only resume execution once the result of the operation is available.
+Processes or threads that \emph{block} on I/O operations are preempted from the CPU and only resume execution once the result of the operation is available.
 Out of this situation, the following type of software architecture emerged:
-\emph{multi-process} and \emph{multi-threaded} servers handle requests by following a sequential description of the steps involved to fulfill the requested task.
+\emph{Multi-process} and \emph{multi-threaded} servers handle requests by following a sequential description of the steps involved to fulfill the requested task.
 Concurrency is then achieved by having multiple threads (either spawned on demand or from a pre-spawned pool) execute the same request-handling function for different connections and to interleave these control flows by time-multiplexing the CPU.
 This interleaving happens each time an I/O activity blocks or at the end of the scheduler-assigned time slice.
 Canonical scalability problems with this approach are the context switching overhead and the minimal amount of memory each thread requires, e.g., for its TCB and stack.
@@ -185,7 +185,7 @@ The server loop picks up the completion events of these asynchronous I/O operati
 This change in turn eventually triggers the state machine to perform the next logical request-handling step for the request represented by the state object.~\cite{flashwebsrv,seda,c10k}
 
 For this thesis, the most relevant difference between multi-threaded and event-driven architecture lies in the representation of request-handling state:
-multi-threaded servers encode it implicitly in the thread's execution state, consisting mostly of its stack, registers and instruction-pointer.
+Multi-threaded servers encode it implicitly in the thread's execution state, consisting mostly of its stack, registers and instruction-pointer.
 In contrast, event-driven servers explicitly define the finite-state machine and have a dedicated representation of the processing state in the state objects.
 
 While the above description focuses on the role of I/O, nothing stops application developers from partitioning their CPU-bound or memory-intensive request-handling steps using the same mechanism.
@@ -194,22 +194,22 @@ The next sections give an introduction to \emph{staged computation} and \emph{st
 \section{Cohort Scheduling \& Staged Computation}\label{ch:relwork:cohort}
 In the early 2000s, \citeauthor*{cohort} investigated the cache behavior of I/O intensive online-transaction processing workloads (OLTP) in servers implementing the multi-process or multi-threaded architecture.
 They observe high cache miss rates and instruction stalls, attributing it to the large amount of system calls made by the request handler threads:
-system calls themselves have a large working set disjoint from the application code and may bring an entirely different working set into the cache when blocking and switching to another thread.~\cite{cohort}
+System calls themselves have a large working set disjoint from the application code and may bring an entirely different working set into the cache when blocking and switching to another thread.~\cite{cohort}
 
 \emph{Cohort scheduling} is then proposed as a scheduling policy to dispatch threads that are currently executing the same code segment in batches (\emph{cohorts}):
-the first thread in a cohort may incur instruction / data cache misses but all successors of the same cohort benefit from a warm cache.
+The first thread in a cohort may incur instruction / data cache misses but all successors of the same cohort benefit from a warm cache.
 Naturally, the threads must yield the CPU before leaving this shared code segment and the segment size must not exceed the i-cache size to avoid thrashing the cache.
-The size of a cohort represents the central trade-off in the scheduling policy: large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
+The size of a cohort represents the central trade-off in the scheduling policy: Large cohorts yield fewer amortized cache misses but cause higher response time due to progress only being made once enough threads have reached the synchronisation point required for batch dispatch.
 Furthermore, since the amortization only reduces the execution time but does not eliminate it, the minimum response time is necessarily increased.~\cite{cohort}
 
 For immediate application, the authors suggest systems calls as pre-existing synchronisation points because they do not require modifying user-space code.
 However, to increase cache locality in arbitrary parts of an application, the authors propose \emph{staged computation}:
-in this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
+In this programming model, instead of synchronous calls to subroutines, the request-handling stage posts asynchronous operation requests to other stages, each encapsulating a particular functionality and state.
 A stage has \emph{scheduling autonomy}, which means it is free to choose the concurrency model that suits the type of provided operation best --- cohort scheduling being just one of several options.~\cite{cohort}.
 
 Cohort scheduling at the syscall boundary is non-invasive with regards to application code bases and will we revisited by \emph{computation spreading} (Section~\ref{ch:relwork:compspr}).
 In contrast, staged computation require non-trivial refactorings in existing applications, in particular if they already follow the multi-threaded model:
-synchronous, blocking operations must be converted to asynchronous operations and continuations, and the scheduling autonomy granted to each stage must actually be addressed in code.
+Synchronous, blocking operations must be converted to asynchronous operations and continuations, and the scheduling autonomy granted to each stage must actually be addressed in code.
 
 \section{Staged Event-Driven Architecture}\label{ch:relwork:seda}
 % difference to staged computation: scalabiltiy, graceful degradation, no focus on cache locality
@@ -226,7 +226,7 @@ The stage controller works in a feedback loop to ensure a stage's performance re
 \footnote{SEDA terminology for a resource controller implementing cohort scheduling is \textquote{batching controller}.}
 Stage controllers can coordinate to avoid resource over-commitment.
 It cannot be stressed enough that the customizability of the stage controller is central to the whole concept of SEDA:
-application developers are given control over the degree of concurrency and can address performance of code modules through custom stage controllers.~\cite{seda}
+Application developers are given control over the degree of concurrency and can address performance of code modules through custom stage controllers.~\cite{seda}
 
 The authors evaluate SEDA by implementing an HTTP server and measuring the performance metrics \emph{total concurrent throughput} and \emph{response time} over a varying number of concurrent clients.
 Additionally, they measure the amount of requests each client completes, defining an equal distribution of service among clients as ideally \emph{fair}. %Jain fairness factor
@@ -259,12 +259,13 @@ While this may facilitate implementation of SEDA itself, it does not address the
 % 3.1 "Most commercial DBMS involve a light-weight mechanism to pass on CPU control (Shore uses user-level threads)." (trifft bspw. auf MySQL nicht zu)
 The \emph{Synchronized Transactions through Explicit Processor Scheduling} (STEPS) project implements a derivative of cohort scheduling in the research database system SHORE.~\cite{shore}
 
-The authors replicate the observation of \cite{cohort} for database systems: the execution flow exhibits low spatial locality and do not fit into the CPU caches, leading to pipeline stalls and a high amount of mispredicted branches.
+The authors replicate the observation of \cite{cohort} for database systems:
+The execution flow exhibits low spatial locality and do not fit into the CPU caches, leading to pipeline stalls and a high amount of mispredicted branches.
 In contrast to cohort scheduling, STEPS groups threads handling a transaction into \emph{team lists} organized by high-level operation (e.g., \texttt{\textsc{insert}}, \texttt{\textsc{update}}.
 The code path of the operation then contains context-switching points (\textit{\texttt{CTX} calls}) at which the currently executing thread yields control to the next member of its team list, which amounts to user-mode round-robin scheduling within a team.
 Context-switching points are placed such that the working set between two of them fits into the CPU's L1 i-cache.
 The idea of cohort scheduling is found in the step-by-step progression over the long code path of the high-level operation:
-we imagine three context-switching points $A$, $B$ and $C$ and a team of ten threads executing between $A$ and $B$, operating on a fully utilized warm i-cache.
+We imagine three context-switching points $A$, $B$ and $C$ and a team of ten threads executing between $A$ and $B$, operating on a fully utilized warm i-cache.
 After the last thread reaches $B$, the team moves forward to the next step  \textit{$B$ to $C$}.
 Although the first thread executing this step will incur capacity i-cache misses, it pre-warms i-cache and branch predictors for the remaining nine threads.~\cite{steps}
 
@@ -273,8 +274,8 @@ Although the first thread executing this step will incur capacity i-cache misses
     \includegraphics[width=0.8\textwidth]{fig_build/cohort_and_steps.pdf}
     \caption{
         Idealized scenario of three threads (different colors) executing the same code path that does not fit into the L1 cache.
-        \textbf{Left}: each thread passes through the code completely before yielding CPU to the next thread.
-        \textbf{Right}: team of threads trickles down the code path in code segments that do not exceed the L1 i-cache size.
+        \textbf{Left}: Each thread passes through the code completely before yielding CPU to the next thread.
+        \textbf{Right}: A Team of threads trickles down the code path in code segments that do not exceed the L1 i-cache size.
     }
     \label{fig:cohort_and_steps}
 \end{figure}
@@ -295,7 +296,8 @@ In contrast, arbitrary applications will use the pthreads and C standard librari
 either substantial modifications to the code base are necessary to establish a situation as found in SHORE
 or runtime-patching via \textsc{\texttt{ld\_preload}} would be required.
 
-Lastly, STEPS's handling of stray threads should be considered: recall that stray threads are removed from their team when performing potentially blocking syscalls, and only re-join a team when being re-used for a new high-level operation.~\cite{steps}
+Lastly, STEPS's handling of stray threads should be considered:
+Recall that stray threads are removed from their team when performing potentially blocking syscalls, and only re-join a team when being re-used for a new high-level operation.~\cite{steps}
 Specifically, this means that STEPS does not account for the instruction footprint of the operating system at all.
 However, \citeauthor*{osCacheFootprint} show that the operating system has a significant cache footprint and should thus be considered when trying to optimize the i-cache footprint.~\cite{osCacheFootprint,compspr} % osCacheFootprint: summary
 Another perspective on the situation is that stray threads will continue to compete for CPU time for the time they are not blocked.
@@ -352,7 +354,7 @@ However, the potential performance gains and cost savings due to improved cache 
 \citeauthor*{kanev2015profiling} identify a significantly higher amount of pipeline stalls in real-world datacenter applications when compared to the SPEC CPU2006 benchmark.
 Apart from the overhead associated with the distributed software architecture (RPC, serialization, etc) % datacenter tax
 a large cache footprint (both code and data) reveals the major performance bottleneck on today's processors for typical datacenter applications:
-the authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be frontend-bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
+The authors observe 60\% of $\mu$op slots to be backend-bound, and 15 -- 30\% to be frontend-bound, which leads to heavy under-utilization of the CPU cores' available resources at a micro-architectural level.
 In particular, the authors find that more than 5\% of cycles are wasted due to empty front-end buffers, which is attributed to instruction read misses in the private L2 cache, resulting in slow accesses to the CPU's shared last level cache.
 Additionally, the observations confirm that applications under active development grow in their instruction working set, worsening the situation.%
 \footnote{The authors present exemplary results of up to 27\% per year.}
@@ -360,7 +362,7 @@ The authors do not explicitly investigate why datacenter applications have such 
 
 In comparison to the work published a decade earlier (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}),
 \citeauthor*{kanev2015profiling} focus on computer-architecture and only pay brief attention to the operating system:
-approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU time in the scheduler alone.
+Approximately 20\% of CPU time is spent in the kernel with more than 5\% of CPU time in the scheduler alone.
 Additionally, it is noteworthy that a 90-th percentile of the observed machines handles more than 4500 concurrent threads.
 Given that at least a portion of these threads will be part of network servers, the question of the concurrency model thus stays very relevant although not explicitly stated as a source of performance-optimizations.~\cite{kanev2015profiling}
 
@@ -385,7 +387,7 @@ However, L2 instruction misses can typically not be compensated by out-of-order 
 
 An adaption of cohort scheduling and STEPS to multiprocessors must thus target the private caches of each core to achieve the similar benefits.
 More importantly, the existence of private caches per hardware thread introduces the problem and opportunity to allocate this resource:
-in terms of STEPS, multiple steps can now be spread over different cores instead of time-multiplexing the single available L1 i-cache.
+In terms of STEPS, multiple steps can now be spread over different cores instead of time-multiplexing the single available L1 i-cache.
 We come back to this observation when assessing \emph{computation spreading} in Section~\ref{ch:relwork:compspr}.
 
 \subsection{Real Parallelism}
@@ -397,7 +399,7 @@ All relevant operating systems abstract CPU cores through threads, and the OS sc
 Cohort scheduling and STEPS were not designed for this situation because
 %both solutions include \emph{batching} as a central element, either at the syscall boundary or at arbitrary points in the application code (see Section~\ref{ch:relwork:cohort}~and~\ref{ch:relwork:steps}).
 \textbf{batching is inherently not work-conserving on SMP systems}:
-all threads in a cohort or team must run on the same core in order to benefit from the warm i-cache, but this means only one thread per team can run at any given time.
+All threads in a cohort or team must run on the same core in order to benefit from the warm i-cache, but this means only one thread per team can run at any given time.
 Furthermore, STEPS and the OS scheduler work actively against each other because the latter will see all threads in a cohort as runnable and actively spread the cohort over all (presumably idle) cores,
 destroying all promised performance benefits.
 
@@ -433,7 +435,7 @@ Data read misses are less affected, with only 13 -- 19\% decrease for Apache web
 The approach leads to a speedup of up to 20\% in Apache and 9.4\% in OLTP measured by the total runtime of the full-system simulation.~\cite{compspr}
 
 Despite the very specific implementation, it should be noted that the concept presented by the authors is more general and not limited to the syscall interface:
-they suggest migration points at arbitrary positions in the application code and corresponding core allocation policies.~\cite{compspr}
+They suggest migration points at arbitrary positions in the application code and corresponding core allocation policies.~\cite{compspr}
 However, we cannot find a concrete proposal ready for implementation.
 
 % \todo{hardware-based approaches?} % http://ieeexplore.ieee.org/document/1410076/
@@ -445,7 +447,7 @@ However, we cannot find a concrete proposal ready for implementation.
 \NewDocumentCommand{\ult}{}{\textsc{ult}\xspace}
 \NewDocumentCommand{\ults}{}{\textsc{ult}s\xspace}
 A Linux-based proof-of-concept implementation at the KIT OS group combines the idea of staged execution, cohort scheduling and computation spreading into a C API that allows for intuitive conversion of existing code bases to staged execution:
-the application developer manually identifies stages and inserts library calls into application code for switching the current stage.
+The application developer manually identifies stages and inserts library calls into application code for switching the current stage.
 Each CPU core is assigned one or more stages and each time a thread switches to a new stage, it is migrated to a core assigned to that stage, benefiting from a warm i-cache.
 Obviously, this approach targets applications that employ thread-based concurrency, i.e. the multi-threaded server architecture outline in Section~\ref{ch:relwork:concmod}, since the stage-switching is embedded into the control flow of the request handler and thus not explicitly modeled like in SEDA (see Section~\ref{ch:relwork:seda}).
 
@@ -455,7 +457,7 @@ Fast thread migration mechanism is required for this technique to succeed
 The Linux built-in facility for this purpose, \texttt{sched\_setaffinity}, is impractical because it uses
 expensive inter-processor-interrupts to implement this syscall, resulting in $9\mu s$ -- $14\mu s$ of migration time.
 As a consequence, thread migration was implemented in user-space:
-for each user-level thread (\ult), there still exists exists a kernel-level thread (\klt),
+For each user-level thread (\ult), there still exists exists a kernel-level thread (\klt),
 but \klts are pinned once to a specific core and stage.
 \ults run on a \klt of the stage they are currently in and migrate to a different \klt when switching stages.~\cite{sodaspr}% sodaspr:table 1 %TODO better sou8rce: compspr
 
@@ -487,10 +489,10 @@ The proof-of-concept is thus clearly not work-conserving on SMP systems, which w
 \chapter{Analysis}\label{ch:analysis}
 Related work has demonstrated that spreading the working set of an application over multiple cores yields lower on-core cache miss rates.
 The proof-of-concept implementation at the KIT OS group furthermore shows that large-scale refactoring of existing code bases is not necessarily required to spread the working set:
-given an application with a suitable threading model, patches of a few lines are sufficient to reduce i-cache misses and branch-misprediction significantly.
+Given an application with a suitable threading model, patches of a few lines are sufficient to reduce i-cache misses and branch-misprediction significantly.
 
 However, its evaluation on an SMP system shows that the solution is not work-conserving as visualized in Figure \ref{fig:kit_os_poc_work_conserving}:
-imagine a system with multiple cores per stage and a \ult $U_1$ in stage $S$ executing on a \klt $K_1$.
+Imagine a system with multiple cores per stage and a \ult $U_1$ in stage $S$ executing on a \klt $K_1$.
 As described above, $K_1$ is pinned to core $C_1$.
 When $U_1$ performs a blocking syscall, for example when trying to acquire a lock, $K_1$ blocks.
 The Linux scheduler now dispatches another task $T$ on $C_1$ to maximize CPU utilization, where $T$ is not a $K_i$ of our application.
@@ -499,11 +501,11 @@ When $K_1$ finally acquires the mutex and is \texttt{ready} again, it is still p
 However, $C_1$ is still executing $T$, not $K_1$, and thus $K_1$ must be put into $C_1$'s ready queue.
 
 The problem at this point is that there may exist \emph{another} CPU $C_2$ where a \klt $K_2$ is dequeuing \ults in the \emph{same stage} $S$:
-if $K_2$ does not have any \ults to execute, $K_1$ should be migrated to $C_2$ immediately when it is woken up and continue execution there, benefiting from the warm on-core caches.
+If $K_2$ does not have any \ults to execute, $K_1$ should be migrated to $C_2$ immediately when it is woken up and continue execution there, benefiting from the warm on-core caches.
 But the implementation only performs thread migration when a \ult calls the stage switching API.
 There is no mechanism in place to save $K_1$'s state and enqueue it to $K_2$'s incoming migration queue on wake-up.
 One might assume it is possible to enqueue $U_1$ to $K_2$ since we saved its register state on kernel entry via \texttt{pthread\_mutex\_lock}:
-this is not possible because there might still be kernel code that needs to run after the mutex is acquired, before returning to $U_1$.
+This is not possible because there might still be kernel code that needs to run after the mutex is acquired, before returning to $U_1$.
 
 \begin{figure}[h]
     \centering
@@ -513,14 +515,15 @@ this is not possible because there might still be kernel code that needs to run 
 \end{figure}
 
 We identify several fundamental problems in the approach taken by the proof-of-concept implementation:
-the requirement for fast thread migration drove the design toward a user-space solution which decouples the threads known by the application (\ults) from the threads known by the kernel (\klts).
+The requirement for fast thread migration drove the design toward a user-space solution which decouples the threads known by the application (\ults) from the threads known by the kernel (\klts).
 However, the kernel scheduler still only handles \klts and assumes a 1:1 threading model, which leads to an \textbf{ambiguous role of \klts} in the proof-of-concept:
-when switching between stages, the user space thread migration code views \klts as the CPUs they are pinned to.
+When switching between stages, the user space thread migration code views \klts as the CPUs they are pinned to.
 But when a \ult running on a KLT interacts with the Linux kernel, the kernel sees a normal \texttt{task\_struct} and continues to assume the 1:1 threading model where tasks can just block.
 The proof-of-concept works around this schizophreny by introducing a callback from the scheduler to react to blocking \klts, but fails to handle asynchronous events like wake-ups.
 The latter leads to non-work-conserving behavior on multi-core systems.
 
-We conclude that the proof-of-concept does not model the situation correctly: the association of stages and CPU cores is piggybacked onto the \klts using \texttt{sched\_setaffinity}, leading to an ambiguous role of \klts.
+We conclude that the proof-of-concept does not model the situation correctly:
+The association of stages and CPU cores is piggybacked onto the \klts using \texttt{sched\_setaffinity}, leading to an ambiguous role of \klts.
 We thus propose that stages must be modeled explicitly in the kernel and be separate entities, beneath CPUs and threads:
 \begin{itemize}%
     \item The association of stages and CPU cores must be represented explicitly.
@@ -650,7 +653,7 @@ The source CPU will atomically set its bit in the target CPU's bitmask and only 
 This avoids flooding the target CPU with IPIs from different cores.~\cite{osvGit,osvMain}
 
 Migrating runnable, but not currently running threads, is easy in this model:
-the source CPU removes the runnable thread from its runqueue and puts it into the incoming queue of the target CPU.
+The source CPU removes the runnable thread from its runqueue and puts it into the incoming queue of the target CPU.
 However, threads may also migrate themselves to another CPU while still running, for example through the \lstinline[style=figurecpp]{pthread_set_affinity} API.
 Let us call this case \emph{synchronous thread migration}:
 In OSv, the migrating thread spawns a short-lived helper thread and immediately schedules out.
@@ -1506,7 +1509,7 @@ With regards to throughput (Figure~\ref{fig:eval:perf:throughput}), our solution
 While upstream OSv throughput is stagnant after the number of terminals exceeds the number of available hardware threads (6 vCPUs), our solution's maximum throughput is achieved at 20 terminals.
 The influence of the \lstinline[style=figurecpp]{max_assignment_age} is negligible.
 In contrast, the influence of MWAIT vs. busy-waiting is significant:
-we achieve more than double the speedup with busy-waiting compared compared to MWAIT.
+We achieve more than 2x the speedup with busy-waiting compared compared to MWAIT.
 
 \begin{figure}
     \centering
