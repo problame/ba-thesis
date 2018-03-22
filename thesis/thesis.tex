@@ -1843,9 +1843,10 @@ We have shown that our dynamic core allocation policy works as designed by analy
 The performance evaluation has shown that for our benchmark scenario, the contribution of dynamic core allocation to the total speedup are only 2 -- 3\% percent points.
 
 While this chapter has shown that our design works as intended and that it improves net application performance, the core allocation policy requires further evaluation.
-For future work, we plan to conduct experiments using different load profiles and less-optimal stages switching points as well as different CPU configuration.
+For future work, we plan to conduct experiments using different load profiles and less-optimal stages switching points.
 Additionally, a mathematical model of the opportunity cost of thread migration vs. incurring i-cache misses would help to define an optimal core allocation policy.
 The optimal policy would then serve as a scale for evaluating real policies.
+At last, further experiments with both lower and higher CPU core counts as well as different cache hierarchies are required to show the general applicability of our solution.
 
 \chapter{Conclusion}\label{ch:concl}
 
