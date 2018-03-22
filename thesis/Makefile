@@ -1,6 +1,9 @@
 SVGS := kit_os_poc_work_conserving \
 	kit_os_poc_blocking \
-	cohort_and_steps
+	cohort_and_steps \
+	$(addprefix mig,0 1 2 3 4) \
+	state_chart_pre_spread \
+	state_chart_post_spread
 
 DOTS := sched_state_diag_upstream \
 	sched_state_diag_spread

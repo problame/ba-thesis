@@ -42,6 +42,9 @@
 \usepackage{amsfonts}
 \usepackage{setspace}
 
+\usepackage{subcaption}
+
+
 \lstdefinestyle{figurecpp}{
   belowcaptionskip=1\baselineskip,
   language=C++,
@@ -789,13 +792,6 @@ Lastly, on the source CPU, the use of helper threads implies memory allocation f
 When a thread switches to another stage, the switching thread queries the core allocation policy for a target CPU that has the target stage's code in its private caches.
 The thread then puts its TCB into the \emph{incoming migrations queue} of the target CPU \emph{while running} and subsequently schedules out.
 The target CPU's \lstinline{reschedule} routine and its idle thread eventually dequeue the TCB pointer from the incoming migrations queue into the runqueue, thereby completing the migration.
-The above procedure is visualized in Figure~\ref{fig:di:mig:basic}.
-
-\begin{figure}
-    \missingfigure[figheight=10cm]{visualize the stage-switching thread migration mechanism. multi-state graphic.}
-    \caption{The basic thread-migration mechanism used for stage-switching.}
-    \label{fig:di:mig:basic}
-\end{figure}
 
 While the above paragraph gives a good overview of our mechanism, we omitted two important details:
 At first, there is a race condition between the point where a migrating thread $T$ puts its TCB pointer into the incoming migrations queue and the point at which it schedules out: \todo{refer to steps in the figure}
@@ -804,14 +800,38 @@ If $T$ now starts running on the target CPU, we have the hazardous situation of 
 We solve this problem by representing the stage-switch as a \emph{two-step} thread state transition:
 Before the migrating thread puts its TCB into the target CPU's incoming migrations queue, it sets its state to \lstinline[style=figurecpp]{stagemig_run}.
 The target CPU will not put threads in that state into its runqueue but instead enqueue it back into the incoming migrations queue because the migration is not yet finished.
-On the source CPU, after $T$ has scheduled out, we then set $T$'s state to \lstinline[style=figurecpp]{statemig_sto}.
+On the source CPU, after $T$ has scheduled out, we then set $T$'s state to \lstinline[style=figurecpp]{stagemig_sto}.
 Eventually, the target CPU will dequeue $T$ again, observe from its state that it is not running anymore and enqueue it into its runqueue.
-The procedure described above is visualized and Figure~\ref{fig:di:mig:race}.
+The procedure described above is visualized and Figure~\ref{fig:di:mig}.
 
 \begin{figure}
-    \missingfigure[figheight=10cm]{visualize how we solve the the race condition. extend figure above}
-    \caption{Thread migration is a two-step operation, represented by two thread states: The target CPU must not put the migrating thread into its runqueue while that thread still finishes scheduling out on the source CPU.}
-    \label{fig:di:mig:race}
+    \centering
+    \subcaptionbox{T is running on core2 and wants to migrate to core1.}[6cm]{
+    \includegraphics[width=5cm]{fig_build/mig0}
+    }
+    \hspace{1.2cm}
+    \subcaptionbox{T switches to \lstinline[style=figurecpp]{stagemig_run} and puts a pointer to its TCB into the incoming migrations queue at core1.
+        Core1's idle thread does not dequeue TCBs with state $\ne$ \lstinline[style=figurecpp]{stagemig_sto}.}[6cm]{
+    \includegraphics[width=5cm]{fig_build/mig1}
+    }
+    \hfill
+    \par
+    \bigskip
+    \subcaptionbox{T schedules out. The context switching routine sets its state to \lstinline[style=figurecpp]{stagemig_sto} after T has stopped running on core2.}[6cm]{
+    \includegraphics[width=5cm]{fig_build/mig2}
+    }
+    \hspace{1.2cm}
+    \subcaptionbox{The idle thread on core1 observes T in state \lstinline[style=figurecpp]{stagemig_sto} and admits it to the ready queue.}[6cm]{
+    \includegraphics[width=5cm]{fig_build/mig3}
+    }
+    \hfill
+    \par
+    \bigskip
+    \subcaptionbox{T starts executing on the core1.}[6cm]{
+    \includegraphics[width=5cm]{fig_build/mig4}
+    }
+    \caption{Fast thread migration without helper threads.}
+    \label{fig:di:mig}
 \end{figure}
 
 The other issue we face with our migration mechanism is that in upstream OSv, the idle thread puts CPUs to sleep using the \textsc{\texttt{halt}} instruction.
@@ -873,7 +893,7 @@ In the latter case, the thread may even observe that it has already been woken u
 
 \begin{figure}
     \centering
-    \includegraphics[width=\textwidth]{fig_build/sched_state_diag_upstream}
+    \includegraphics[width=\textwidth]{fig_build/state_chart_pre_spread}
     \caption{Upstream OSv wakup-related thread state transitions: States \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambigous with regard to whether the thread is still scheduling out whether it has fully stopped executing.
     Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.}
     \label{fig:di:wake:upstreamstates}
@@ -895,7 +915,7 @@ Figure~\ref{fig:di:wake:spreadstates} presents the resulting state transition di
 
 \begin{figure}
     \centering
-    \includegraphics[width=\textwidth]{fig_build/sched_state_diag_spread}
+    \includegraphics[width=\textwidth]{fig_build/state_chart_post_spread}
     \caption{Modified OSv wakeup-related thread state transitions: All states are unambious about whether the thread is still running or completed scheduling out.
         Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.
     }
