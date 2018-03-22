@@ -719,7 +719,8 @@ void request_handler(database db, net::conn c) {
 \label{fig:di:api:exampleraw}
 \end{figure}
 
-In addition to the direct invocation of the switching API, we provide a RAII-style data-structure reminiscent of C++11 lock guards to switch to a stage for the lifetime of a block and switch back to the previous stage when the guard object goes out of scope.
+In addition to the direct invocation of the switching API, we provide a data-structure similar to C++11 lock guards:
+Following the \emph{resource aquisition is initialization} (RAII) paradigm, the structure allows switching to a stage for the liftetime of a block and to automatically switch back to the previous stage when the guard object goes out of scope.
 This can be used to shift the responsibility of switching stages from the function caller to the callee, which is particularly useful when a piece of code is large enough to have its own stage but is called from more than one other stage.
 Figure~\ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
 
