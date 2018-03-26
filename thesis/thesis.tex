@@ -1630,7 +1630,7 @@ We interpret the above results as confirmation that we successfully spread the i
 The use of MWAIT does not correlate with the cache behavior of our solution, i.e., the quality of instruction working set spreading is independent of the sleeping strategy.
 
 \clearpage
-\subsection{Thread Migration Mechanisms}\label{ch:eval:mig}
+\subsection{Changes to Thread Migration}\label{ch:eval:mig}
 % hypothesis: thread migration on Linux and upstream OSv is not faster than 9 - 14 us (ref sodaspr / compspr)
 %             our thread migration is as fast as the code path from enqueue to switch_to + memory latency / cache coherence protocol
 % method: microbenchmarks using std::clock* which uses high-res clock
