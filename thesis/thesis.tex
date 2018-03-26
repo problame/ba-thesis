@@ -1253,7 +1253,7 @@ By dedicating CPU cores to stages, threads always execute code that is in the pr
 In this chapter, we evaluate our implementation in the OSv library operating system to validate the following theses:
 \begin{enumerate}
     \item Existing applications can adopt our solution with minimal changes required to the existing code.
-        We show this by documenting the adoption of the stage API in MySQL v5.6.
+        We show this by documenting the adoption of the stage API in MySQL~5.6.
     \item Our solution improves relevant performance metrics for these applications compared to upstream OSv and virtualized Linux.
         We show this using industry-standard TPC-C benchmark.
     \item Above performance improvements are due to the stage-aware scheduling technique presented in this thesis:
@@ -1265,13 +1265,13 @@ In this chapter, we evaluate our implementation in the OSv library operating sys
         \item Our core allocation policy allocates CPUs proportional to stage load.
             We show this by instrumenting the corresponding code with OSv tracepoints.
         \item Our core allocation policy improves application performance compared to fixed core allocation.
-            We show this using TPC-C over a varying the number of concurrent client connections.
+            We show this using TPC-C with a varying the number of concurrent client connections.
     \end{enumerate}
 \end{enumerate}
 
 The remainder of this chapter is structured accordingly:
 Section~\ref{ch:eval:setup} describes the hard- and software setup common to all measurements presented in this thesis.
-Subsequently, we show the adoption of the stage API in MySQL~v5.6 in Section~\ref{ch:eval:stageapi}.
+Subsequently, we show the adoption of the stage API in MySQL~5.6 in Section~\ref{ch:eval:stageapi}.
 Section~\ref{ch:eval:perf} then presents the MySQL performance comparison using TPC-C.
 The remaining sections cover the validation of our design assumptions:
 In Section~\ref{ch:eval:spreading}, we show that we successfully spread MySQL's instruction working set over multiple cores.
@@ -1304,6 +1304,7 @@ The CPU's cache hierarchy consists of a 20MiB shared, inclusive, 20-way set asso
 All private caches are 8-way set-associative.
 Via the BIOS, we disable SMT because the core allocation policy does not support it (see Section~\ref{ch:concl:fw}).
 We also disable automatic switching to lower C-states to remove latency jitter.
+A more detailed dump of the hardware configuration is available in the appendix (Chapter ~\ref{ch:appendix}).
 
 We use the Fedora 27 Linux distribution with Linux kernel version 4.13.9 (Fedora package \lstinline[style=figurecpp]{4.13.9-300.fc27.x86_64}) as the machine operating system.
 We remove the measurement noise caused by dynamic voltage and frequency scaling by setting the scaling governor to \lstinline[style=figurecpp]{performance} mode and disabling the \lstinline[style=figurecpp]{turbo} frequency range.
@@ -1322,8 +1323,8 @@ The goal of the above setup is to give the guest operating system control of the
 This is required for our solution because all expected performance benefits are achieved by optimizing cache behavior.
 However, we are also unaware of any factors that would disadvantage in the comparisons made in this chapter.
 
-When using Linux as a baseline, we refer to an installation of Debian 9 in a virtual machine configured to start the MySQL 5.6.38 Docker image.
-Inside the VM, we bind-mount the MySQL data directory from the ext4-formatted root partition on the emulated HDD.
+When using Linux as a baseline, we refer to an installation of Debian 9 in a virtual machine that starts the MySQL 5.6.38 Docker image on boot.
+The MySQL data directory is bind-monuted from the ext4-formatted root partition on the emulated HDD to avoid the overhead of unionfs.
 For all other aspects, the QEMU configuration described above applies.
 
 With regards to OSv, we must emphasize again we had to reduce the frequency of the \emph{page access scanner} (PAS) system thread from 1000Hz to 10Hz (see Chapter~\ref{ch:di:pol:pas:eval}).
@@ -1476,9 +1477,8 @@ However, there are a number of obvious points for criticism in the above approac
 First, the cache-simulator-based switching points are located at semantically unintuitive positions in the source code.
 Thus, while the patch is small in size, a human developer can only port it across patch-levels of a given version of MySQL, hoping that the instruction working set does not change significantly.
 We expect new major versions to require a one-time r-rerun of the simulation process.
-Second, the patches are specific to the simulated cache hierarchy, requiring ready-to-run images to be built per targeted CPU.
-While this approach is prohibitive for fragmented setups, we expect the targeted medium to large-scale deployments to use homogeneous hardware, facilitating deployment.
-Additionally, it should be noted that the very popular Intel x86-64 micro-architectures since \emph{Nehalem} (2008) have used the same cache sizes and associativity per core, although \emph{Skylake} server processors have moved form 256KiB to 1MiB L2 cache in 2017~\cite{nehalemCacheHierarchy,skylakeServerCacheHierarchy}.
+Second, the patches are specific to the simulated cache hierarchy, which implies that different patches and thus different builds may be required for deployment on a fragmented hardware infrastructure.
+However, it should be noted that the very popular Intel x86-64 micro-architectures since \emph{Nehalem} (2008) have used the same cache sizes and associativity per core, although \emph{Skylake} server processors have moved form 256KiB to 1MiB L2 cache in 2017~\cite{nehalemCacheHierarchy,skylakeServerCacheHierarchy}.
 At last, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
 Indeed, we can imagine a lot of improvements to the tooling but leave this subject to future work.
 
@@ -1584,7 +1584,7 @@ Specifically, we record L2 cache events as well as those events required to comp
     }
     \caption{
         L2 cache misses of MySQL under TPC-C benchmark with 1 and 50 TPC-C terminals.
-        The table below shows the relative amount of code data misses in our solution vs. upstream.
+        The table below shows the relative amount of code and data misses in our solution vs. upstream.
     }
     \label{fig:eval:spreading:l2}
 \end{figure}
@@ -1595,7 +1595,7 @@ Specifically, we record L2 cache events as well as those events required to comp
 %Pre-halt spinning in turn does not affect L2 metrics but distorts the Top-Down top-level breakdown: It increases the \textit{retired} fraction at the cost of all other fractions, because a tight loop is neither frontend- nor backend-bound and leaves little room for bad speculation.
 %For the above reasons, we use \textsc{\texttt{mwait}} in the idle thread and remove the pre-halt, which makes the upstream OSv idle thread equivalent to our solution in \textsc{\texttt{mwait}} mode.
 
-Figure~\ref{fig:eval:spreading:l2}~and~\ref{fig:eval:spreading:td} visualize the results of the above run.
+Figure~\ref{fig:eval:spreading:l2}~and~\ref{fig:eval:spreading:td} visualize the results of the run described above.
 We observe a reduction of L2 code misses per request by up to 65\% while increasing data misses by at most 2\%.
 MWAIT vs. busy-waiting does not affect the cache behavior of our solution significantly.
 However, we see increased code misses in upstream when using HALT vs. MWAIT and busy-waiting.
@@ -1647,29 +1647,29 @@ Additionally, we refactored the wake-up mechanism to allow thread migration on w
 In this section, we validate that we reduced migration latency, the effect of this change on throughput and the additional speedup achieved through thread migration on wakeup.
 
 As a baseline for comparison, we implement the stage API in upstream OSv using the upstream thread migration primitives:
-Specifically, we disable the load balancing mechanism and implement thread migration on stage switch using the \lstinline[style=figurecpp]{thread::pin(thread*, cpu*)} remote asynchronous thread migration API.
-We cannot not use the synchronous API (\lstinline[style=figurecpp]{thread::pin(cpu*)}) for this purpose because it reproducibly crashes with failed assertions in the upstream timer implementation when invoked at high frequency.
+Specifically, we disable the load balancing mechanism and implement thread migration on stage switch using the \lstinline[style=figurecpp]{thread::pin(thread*, cpu*)} remote asynchronous thread migration API (see Section~\ref{ch:di:osv:sched} and file \texttt{core/sched.cc} in ~\cite{osvGit}).
+We cannot not use the synchronous API (\lstinline[style=figurecpp]{thread::pin(cpu*)}) for this purpose because it reproducibly crashes with failed assertions in the upstream timer implementation when invoked at high frequency~\cite{osvBugSyncThreadMig}.
 We configure both upstream and our solution to use fixed core allocation with two dedicated cores per stage.
 Both implementations choose the core with the shorter runqueue length as migration target.
-In addition to the configurable idle strategies in Section~\ref{ch:eval:setup:idle}, we also implemented an option to disable pre-halt spinning in the idle thread.
-For brevity, we will refer to the pre-halt / pre-mwait spinning as \texttt{prespin} and for direct halting / mwait as \texttt{nospin}.
+In addition to the configurable idle strategies in Section~\ref{ch:eval:setup:idle}, we also implement an option to disable pre-halt spinning in the idle thread to avoid distortions to the top-down top-level breakdown.
+For brevity, we will refer to the pre-halt or pre-mwait spinning as \texttt{prespin} and for direct HALT or MWAIT as \texttt{nospin}.
 
 We measure stage switching latency using a self-written micro-benchmark (\texttt{hopper}).
 We configure the benchmark to define 3 stages and perform 100000 round-robin stage migrations.
 \texttt{hopper} discards the first 1000 iterations and collects the remaining results in a histogram with 200ns buckets.
 Figure~\ref{fig:eval:mig:hopperdists} shows the results:
 Our solution achieves a mean latency of 1300ns with more than 97\% of migrations under 1400ns.
-The influence of MWAIT is visible in form of a slightly wider-spread distribution and an increased mean value 1660ns, amounting to 260ns additional latency.
+The influence of MWAIT is visible in form of a slightly wider-spread distribution and an increased mean value 1660ns, amounting to 360ns additional mean latency.
 
 Upstream OSv achieves 6146ns mean latency in the \texttt{mwait-nospin} configuration and 6528ns in \texttt{halt-nospin} configuration.
 As can be seen in the histogram, \texttt{mwait-prespin} and \texttt{busy} achieve practically equivalent latencies at $\approx$ 4300ns while the \texttt{halt-prespin} configuration has approximately the same offset to \texttt{mwait} in the \texttt{nospin} case.
 For the micro-benchmark, this is unsurprising, because it does not perform any work in a stage, switching to the next one immediately.
 Apparently, the benchmark reaches the first stage again before both of its cores went to sleep.
 
-We were unable to find an explanation for the different penalties of MWAIT for our solution vs. upstream (+260ns vs. +1800ns).
+We were unable to find an explanation for the different penalties of MWAIT for our solution vs. upstream (+360ns vs. +1800ns).
 % IPIs are only enabled for HALT, and we tested manually that the addiitonal irq_lock with the lock guard is not causing significant latency
-However, the more important observation is that even with busy waiting, our solution has more than 300\% lower latency.
-The mean value of 1660ns with MWAIT is as fast as bare-metal IPIs propagation time.~\cite{ipiLatencyPopcornLinux}
+However, the more important observation is that even with busy waiting, our solution achieves more than 70\% lower latency:
+The mean value of 1660ns with MWAIT is even as fast as bare-metal IPIs propagation time.~\cite{ipiLatencyPopcornLinux}
 Since busy-waiting in upstream and our solution have the same propagation time through the cache coherence protocol, we can be certain that all additional overhead is due to interrupt virtualization and the performance implications of helper threads in upstream OSv.
 
 \begin{figure}
@@ -1684,24 +1684,24 @@ Since busy-waiting in upstream and our solution have the same propagation time t
     \label{fig:eval:mig:hopperdists}
 \end{figure}
 
-Despite the insights presented above, we must still investigate whether the reduced migration latency has any practical effect on application performance when using thread migration for spreading the instruction working set.
-To measure this, we use the TPC-C benchmark with a single terminal and compare the achieved throughput.
-The absence of concurrent clients removes the influence of thread-migration on wake-up and allows us to attribute speedup solely to faster stage switches.
-To show the additional speedup due to thread-migration on wake-up, we then repeat the above experiment with more than one terminal.
+Despite the insights presented above, we must still investigate whether our improvements to thread migration have any practical effect on application performance.
+We use the TPC-C benchmark and our stagified version of MySQL to compare the throughput achieved with the stage API implementation on upstream OSv vs. our solution.
 
-The results are presented in Figure~\ref{fig:eval:mig:tpcc}:
-With a single terminal, our solution achieves 8 -- 10\% increased throughput compared to all upstream configurations.
-With regards to the influence of busy-waiting vs. MWAIT, we see a 14\% increase for our solution with busy-waiting and a single terminal.
-For upstream OSv, throughput for a single terminal is not affected by pre-spinning vs. directly going to sleep.
+The results are presented in Figure~\ref{fig:eval:mig:tpcc}.
+With a single terminal and busy-waiting, our solution achieves 8 -- 9\% higher throughput.
+At 15 terminals in contrast, we achieve 18\% increased throughput, which is further sustained for higher terminal counts.
+We interpret the single-terminal speedup as the influence of reduced migration latency:
+With a single client, there is always at most one runnable request-handler thread in the system, hence no need for thread-migration on wake-up.
+For multiple terminals, the additional 10 percent points in throughput can consequently be attributed to thread-migration on wake-up.
 
-For an increased number of terminals, we observe that our solution maintains an 8 -- 10\% speedup with MWAIT, and gains another 10 percent points when using busy-waiting.
-We attribute this extra these extra 10 percent points to thread-migration on wakeup.
+Looking at the effect of MWAIT vs. busy-waiting, the 90\% higher throughput of \texttt{upstream prespin} and \texttt{upstream busy-waiting} vs. \texttt{upstream nospin} is very prominent.
+In contrast, our solution is only 10 -- 14\% faster with busy-waiting vs. MWAIT.
+These effects correlate with the different migration latency increases observed with the micro-benchmark (+1800ns vs +360ns) for which we do not have a plausible explanation.
+Since the migration latency increases are not the same, we cannot clearly attribute the throughput differences between upstream and our solution to either thread-migration on wake-up or absolutely lower migration latency.
 
-Additionally, we observe that upstream achieves similar performance with pre-spinning-then-halt vs. busy-waiting.
-This means that during the benchmark, every core is used so frequently that it never goes to sleep.
-When further comparing the pre-spin to the no-spin configuration, we observe a performance gap of up to 90\% for high terminal counts.
-The gap for our solution is only 10\%, which we see by comparing the bars in the left and right column of the figure.
-The data does not allow us to distinguish between the influence of reduced migration latency and thread migration on wake-up in this case.
+Given the results presented in this section, we can conclude that our changes to thread migration are the most relevant contributor to the total 22\% increase of throughput achieved by our solution (see Section~\ref{ch:eval:perf}).
+While both migration latency and thread-migration on wake-up have been shown to provide performance improvements in the busy-waiting case,
+the relationship of MWAIT to migration latency and throughput requires further investigation in future work.
 
 \begin{figure}
     \resizebox{\linewidth}{!}{
@@ -1721,29 +1721,31 @@ The data does not allow us to distinguish between the influence of reduced migra
 \end{figure}
 
 \clearpage
-\subsection{Core Allocation --- Validation of Implementation}\label{ch:eval:polidea}
+\subsection{Core Allocation: Validation of Implementation}\label{ch:eval:polidea}
 
 The last major component of our design is the core allocation policy.
 We validate that it works as designed by instrumenting the allocation code with OSv tracepoints, recording the momentary stage load vector, the new core assignment and the total execution time of the core allocation algorithm in nanoseconds.
-We use the default \lstinline[style=figurecpp]{max_assignment_age} of 20ms while executing the TPC-C benchmark with 1, 6 and 30 terminals.
+We use the default \lstinline[style=figurecpp]{max_assignment_age} of 20ms while executing the TPC-C benchmark with 1, 3, 6 and 12 terminals.
 The figures referred to in this paragraph present a 1000ms window of a manually captured trace, which amounts to 50 invocations of the core allocation routine.
-Since we check relevant data structure invariants at runtime, we will rely on visualizations to validate that the overall idea works as designed.
+We check relevant data structure invariants at runtime and will thus rely on visualizations to validate that the overall idea works as intended.
 
 As can be seen in Figure~\ref{fig:eval:capimpl:cabystageload}, the raw stage load (number of runnable threads per stage) is very spiky and only grows slowly with the number of TPC-C terminals.
-As explained in Section~\ref{ch:relwork:concmod}, this pattern is typical for I/O bound servers  --- we assume that MySQL's request handlers frequently switch between runnable and blocked state.
-The spiky load legitimates the exponentially-decaying average filter, whose effect can be observed in the first column:
-Stage 0 load rises shortly before the 400ms mark but the stage's corresponding entry in the requirements vector only rises from 2 to 3 cores at about 420ms.
+As explained in Section~\ref{ch:relwork:concmod}, this pattern is typical for I/O bound servers:
+We assume that MySQL's request handlers frequently switch between runnable and blocked state.
+The spiky load profile is smoothened by the exponentially-decaying average filter, which can can be well observed in the first column:
+Stage 0 load rises shortly before the 400ms mark but its corresponding entry in the requirements vector only rises from 2 to 3 cores at about 420ms.
 Also, we see that the number of cores assigned to a stage only rarely drops to 0.
 In combination with the L2 metric results from Section~\ref{ch:eval:spreading}, this confirms that our stage switching points were well-chosen:
 All stages are used sufficiently to be assigned at least one core most of the time.
 
 The decisions of the \emph{minimal transition} algorithm are visualized in Figure~\ref{fig:eval:capimpl:cabycore}:
 As designed, we only see the cores with a lower index switch stages frequently while cores with a higher index clearly tend to keep the same stage.
+Since we do not have a precise model of the opportunity costs of thread migration vs. cache thrashing, we consider avoiding flapping of cores a positive result.
 
 At last, we take a look at the runtime of the entire core allocation algorithm in Figure~\ref{fig:eval:capimpl:runtime}:
 The runtime is obviously independent of the number of threads in the system (around 1$\mu s$) but shows significant jitter.
 Given the fact that the runtime is amortized over 20ms, less than 0.1\% of CPU time will be spent on the scheduling algorithm.
-However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ asymptotic runtime complexity of \emph{minimal transition} algorithm in this section.
+However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ asymptotic runtime complexity of \emph{minimal transition} algorithm in this section, since the evaluation setup is fixed to $S = 3$ stages and $C = 6$ cores.
 
 \begin{figure}
     \centering
@@ -1751,7 +1753,7 @@ However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ a
         \resizebox{\linewidth}{!}{
             \input{\evalfigpath{cap_assignment_by_stage_load.pgf}}
         }
-        \caption{Stage load and resulting requirements vector over time.}
+        \caption{Stage load and resulting requirements vector over time. The exponentially-decaying average filter smoothens the high jitter.}
         \label{fig:eval:capimpl:cabystageload}
     \end{subfigure}
     \par\par\hfill
@@ -1761,7 +1763,9 @@ However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ a
         \resizebox{\linewidth}{!}{
             \input{\evalfigpath{cap_assignments_by_core.pgf}}
         }
-        \caption{Core Assignment over time (time on y-axis).}
+        \caption{Core Assignment over time (time on y-axis).
+        The minimal transition algorithm leads to stable allocations, in particular for higher core counts.
+        }
         \label{fig:eval:capimpl:cabycore}
     \end{subfigure}
     \par\par\hfill
@@ -1771,17 +1775,19 @@ However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ a
         \resizebox{0.5\linewidth}{!}{
             \input{\evalfigpath{cap_runtime.tex}}
         }
-        \caption{Runtime of the algorithm.}
+        \caption{Runtime of the algorithm, independent of the terminal count.}
         \label{fig:eval:capimpl:runtime}
     \end{subfigure}
-    \caption{Visualization of the core allocation policy decisions.}
+    \caption{
+        Visualization of the core allocation policy decisions.
+    }
 \end{figure}
 
 
 
 
 \clearpage
-\subsection{Core Allocation Policy -- Performance Evaluation}\label{ch:eval:polperf}
+\subsection{Core Allocation: Performance Evaluation}\label{ch:eval:polperf}
 
 After having validated that the core allocation policy works as designed in the previous section, we will now evaluate its effect on application performance.
 As a baseline, we use our version of OSv with fixed core allocation with two dedicated cores per stage.
@@ -1792,11 +1798,12 @@ The comparison between fixed core allocation and the core allocation policy is f
 
 As is visible in Figure~\ref{fig:eval:capperf:table}, the maximum increase in throughput achieved by the core allocation policy is only 3\%, starting at 25 TPC-C terminals and higher.
 Additionally, these 3\% are only reached when using busy-waiting --- the speedup with MWAIT is at most 2\%.
-The impact of dynamic core allocation on request latency is negligible.
+Further, especially for MWAIT, the improvement lies within the standard deviation and is thus not very relevant.
 The L2 cache metrics show that the core allocation policy reduces codes misses per request by up to 5\%.
 However, data misses are increased by 1 -- 2\%.
+The impact of dynamic core allocation on request latency is negligible (not shown in the figure).
 
-Since these improvements are fairly minor compared to what we saw for fast thread migration in Section~\ref{ch:eval:mig}, it would be rather easy to dismiss dynamic core allocation as unnecessary.
+Since these improvements are very minor compared to what we observed in Section~\ref{ch:eval:mig}, it would be rather easy to dismiss dynamic core allocation as unnecessary.
 However, we are convinced that the scenario presented in this section is very beneficial to fixed core allocation:
 The fixed core allocation is equivalent to the core allocation policy if
 \begin{enumerate*}[label=(\alph*)]
@@ -1804,7 +1811,7 @@ The fixed core allocation is equivalent to the core allocation policy if
     \item the number of vCPUs is a multiple of the number of stages. \label{ch:eval:polperf:arg2}
 \end{enumerate*}
 If these two criteria are true, the core allocation proportional to stage load will always result in 2 cores per stage, which is equivalent to the fixed core allocation presented in this example.
-We have already shown in Section~\ref{ch:eval:polidea} that our stage switching points are very close to an ideal placement, which is likely due to the simulation-based approach that we used to find them (see Section~\ref{ch:eval:stageapi}).
+We have already shown in Section~\ref{ch:eval:polidea} that our stage switching points are very close to an ideal placement, which is likely due to the simulation-based approach that was used to find them (see Section~\ref{ch:eval:stageapi}).
 Because we use 6 vCPUs for 3 stages in MySQL, condition \ref{ch:eval:polperf:arg2} is also true.
 
 \begin{figure}
@@ -1813,7 +1820,7 @@ Because we use 6 vCPUs for 3 stages in MySQL, condition \ref{ch:eval:polperf:arg
             \input{\evalfigpath{cap_perf_throughput.pgf}}
         }
         \caption{
-            TPC-C throughput. The y-axis is off-set.
+            TPC-C throughput. The y-axis is off-set. Error bars represent standard deviation.
         }
         \label{fig:eval:capperf:throughput}
     \end{subfigure}
@@ -1826,7 +1833,10 @@ Because we use 6 vCPUs for 3 stages in MySQL, condition \ref{ch:eval:polperf:arg
         \label{fig:eval:capperf:table}
     \end{subfigure}
     \label{fig:eval:capperf}
-    \caption{Comparison of the core allocation policy vs. fixed core allocation with varying number of terminals and idle thread strategy.}
+    \caption{Comparison of the core allocation policy vs. fixed core allocation with varying number of terminals and idle thread strategy.
+    The throughput improvement of dynamic core allocation is very minor (2 -- 3\%).
+    However, the evaluation setup is optimal for the baseline, thus mandating future work to evaluate the true effectiveness of dynamic core allocation.
+}
 \end{figure}
 
 \clearpage
@@ -1835,17 +1845,17 @@ As shown in in the previous section, our stage-aware scheduling solution is able
 The speedup is sustained at a high number of concurrent clients.
 In contrast to previous work in the field, we do not sacrifice request latency for improved throughput.
 
-At the example of MySQL, we have shown that the required modifications to an existing code base are negligible to reap the benefits of our solution.
+By stagifying MySQL, we have shown that the required modifications to an existing code base are negligible to reap the benefits of our solution.
 However, we have learned that a simulation-based approach~\cite{kitOSSFMA} for finding stage switching points is preferable over manual placement by a human developer.
 
-Our thread migration mechanism achieves 1700ns migration latency which is 300\% faster than the corresponding upstream OSv primitive.
-The lower overhead of our mechanism is responsible an 8 -- 10\% speedup in throughput with a single client compared to an implementation based on upstream thread migration.
-Additionally, we achieve another 10 percent points by implementing thread migration on wakeup for our scheduling policy, thereby overcoming the limitations of the KIT OS group's proof of concept implementation in Linux.
+Our thread migration mechanism achieves $\approx$ 1700ns migration latency which is more than 3 times faster than the corresponding upstream OSv primitive.
+The lower overhead of our mechanism is responsible for an 8 -- 10\% speedup in throughput with a single client compared to an implementation based on upstream thread migration.
+Additionally, we achieve another 10 percent points in throughput improvement by implementing thread migration on wake-up and using it in our scheduling policy, thereby overcoming the limitations of the KIT OS group's proof of concept implementation in Linux.
 
 We have shown that our dynamic core allocation policy works as designed by analyzing traces of the allocation algorithm.
-The performance evaluation has shown that for our benchmark scenario, the contribution of dynamic core allocation to the total speedup are only 2 -- 3\% percent points.
+The performance evaluation has shown that for our benchmark scenario the contribution of dynamic core allocation to the total speedup are only 2 -- 3\% percent points.
 
-While this chapter has shown that our design works as intended and that it improves net application performance, the core allocation policy requires further evaluation.
+Although this chapter has shown that our design works as intended and that it improves net application performance, the core allocation policy requires further evaluation.
 For future work, we plan to conduct experiments using different load profiles and less-optimal stages switching points.
 Additionally, a mathematical model of the opportunity cost of thread migration vs. incurring i-cache misses would help to define an optimal core allocation policy.
 The optimal policy would then serve as a scale for evaluating real policies.
@@ -1854,38 +1864,48 @@ At last, further experiments with both lower and higher CPU core counts as well 
 \chapter{Conclusion}\label{ch:concl}
 
 In this thesis, we have presented a scheduler design that leverages fast thread migration to spread a multi-threaded server's instruction working set over the private caches of an SMP system.
-Our implementation in the OSv library operating system and the evaluation with the MySQL DBMS show that our technique causes a 22\% increase in throughput due to reduced instruction cache misses.
+Instruction working set spreading improves application performance because datacenter applications have been shown to thrash the private i-caches of contemporary processors.
+Our implementation in the OSv library operating system and the evaluation with the MySQL DBMS show that our solution increases throughput by up to 22\% and reduces i-cache misses by 65\%.
 
-We have shown that previous work in the field unnecessarily trades off request latency for throughput by batching requests to achieve the re-use of warm i-caches.
+Previous work in the field from the early 2000s unnecessarily trades off request latency for throughput by batching requests to achieve the re-use of warm i-caches.
 We argue that these designs are outdated due to the ubiquitous availability of SMP systems, enabling techniques such as computation spreading.
 We have presented the groundwork for our thesis done at the KIT OS group:
-A software-only approach for computation spreading implemented as a prototype in Linux allows applications to partition a thread's instruction working set at arbitrary points.
+A software-only approach for computation spreading implemented as a prototype in Linux that allows applications to partition a thread's instruction working set at arbitrary points in the application code.
 By migrating threads to different cores at these points, the instruction working set is spread over the private i-caches of all cores and i-cache misses are reduced.
 
-Our contribution is an analysis of the root cause for the lack of multi-score scalability in the Linux prototype,
+Our contribution is an analysis of the root cause for the lack of multi-core scalability in the Linux prototype,
 the definition of clean OS abstractions for the concept of computation spreading and
-a thread scheduler design that is work-conserving.
+a work-conserving thread scheduler design implemented in the OSv library operating system.
 We define stages as operating system objects that represent spans in the code path of a server application's request handler threads.
 Each stage is smaller than the private i-cache of a single core.
-We further track a thread's current stage in its TCB, enabling the implementation of scheduler that takes cache-residency of a thread's instruction working set into account.
+We further track a thread's current stage in its TCB, enabling the implementation of a scheduler that takes cache-residency of a thread's instruction working set into account.
 Our scheduling policy time-multiplexes cache-residency by dedicating cores to stages for certain time intervals.
 The scheduler dispatches a thread in a particular stage only onto those cores that are assigned to its current stage.
 This enables threads to benefit from always-warm i-caches.
-The evaluation has shown that our fast thread migration mechanisms and the integration of our policy into the wake-up mechanisms are the main contributors for increased application performance and multi-core scalability of the concept.
+
+The evaluation has shown that we achieve 22\% increased throughput in an optimal configuration and 9\% increased throughput when using the power-saving MWAIT instruction when waiting for incoming threads in the thread migration mechanism.
+Both configurations reduce L2 code misses by 65\%.
+Request latency is also slightly reduced, confirming our thesis that an SMP-oriented design can avoid the penalties on request latency of the early 2000's proposals.
+We have shown that fast thread migration and the integration of our policy into the scheduler's wake-up mechanism are necessary to achieve the performance improvements described above.
+At last, we have confirmed that our core allocation policy works as designed and that its contribution to the overall throughput speedup is at most 2 -- 3 \% compared to fixed core allocation.
+However, we provide arguments to show that fixed core allocation is not a suitable baseline for evaluating the contribution of dynamic core allocation to the observed performance improvements.
 
 \section{Future Work}\label{ch:concl:fw}
 
-We have already discussed the limitations of the evaluation in Section~\ref{ch:eval:discussion}.
-However, there is also room for improvement in the general design.
+We have already discussed the limitations of the evaluation in Section~\ref{ch:eval:discussion}:
+Due to lack of a known optimal allocation policy, we chose fixed core allocation as a baseline for evaluating our dynamic core allocation policy.
+However, the choice of migration points and the fixed evaluation setup of $3$ stages and $6$ cores advantages fixed core allocation, leaving little room for improvement with dynamic core allocation.
+Future work should thus include a known optimal allocation policy and a re-evaluation of our core allocation policy with regards to sub-optimal stage-switching points, responsivity to varying load profiles as well as different core and stage counts.
 
-First, the evaluation setup with pinned QEMU helper threads is not representative of the current offerings of public cloud hosting providers .
+Apart from the limitations of the evaluation, there is also room for improvement in the general design.
+First, the evaluation setup with pinned QEMU helper threads is not representative of the current offerings of public cloud hosting providers.
 Apart from evaluating other virtualization technologies, we can imagine a hypercall interface to pin QEMU helper threads to specific dedicated vCPUs from within the guest VM.
 
 %\item at ITEC OS Group: automatic profiling \& finding of migration points.
 
 Second, integration of our solution into other languages can be simplified by providing a C-version of our stage API.
 This is particularly interesting in combination with Java:
-The standard library encourages the traditional thread-based model, to which our solution is applicable.~\cite{javaThreadConcurrency}
+The standard library encourages the traditional thread-based model~\cite{javaThreadConcurrency}, to which our solution is applicable.
 
 Third, our scheduler could be extended to program performance-counters during runtime to measure the net-effect of thread migration, e.g., by monitoring L2 i-cache misses.
 Additionally, server applications could inform the scheduler about request completions.
@@ -1893,17 +1913,19 @@ Given a mathematical model of the opportunity cost of thread migration, the sche
 
 Finally, the core allocation policy should be extended to support simultaneous multithreading:
 The hardware threads of an SMT-enabled CPU are commonly exposed to the operating system as separate logical CPU cores.
-The corresponding topology information, i.e., which of these logical cores belong to which physical cores, can be obtained through corresponding instructions.
-Since logical cores share the private cache of the physical core, the core allocation policy would need to assert that all logical cores of a physical core are assigned to the same stage to prevent i-cache thrashing.
-We expect the performance impact of MWAIT to be at least mitigated by the above, because MWAIT switches the physical core to the other hardware thread if SMT is enabled.~\cite{intelSDMHyperthreading}
-
+The corresponding topology information, i.e., which of these logical cores belong to which physical cores, can be obtained through instructions such as CPUID.~\cite{intelSDMTopology}
+Logical cores share the private cache of the physical core.~\cite{intelSDMHyperthreading}
+The core allocation policy would need to assert that all logical cores of a physical core are assigned to the same stage to prevent i-cache thrashing.
+We expect the performance impact of MWAIT to be mitigated in this scenario because the logical cores that are not idling can continue to perform useful work.~\cite{intelSDMHyperthreading}
 
 \backmatter
 
-\chapter{Appendix}
+\chapter{Appendix}\label{ch:appendix}
 
 This thesis was submitted with a digital copy of our implementation, benchmarking tools and supplemental utility scripts.
-To facilitate navigation in the material, we provide the the following overview.
+Futhermore, we make this material available via GitHub:
+All repositories referenced below are published under the \url{github.com/problame} account.
+To facilitate orientation in the codebase, we provide the the following overview.
 
 \begin{itemize}
     \item \textbf{OSv versions}:
@@ -1928,11 +1950,13 @@ To facilitate navigation in the material, we provide the the following overview.
         We call it \texttt{doltp}, it is responsible for starting the VM, starting perf, starting \texttt{oltpbenchmark} on the remote machine, etc.
         It is available in the \gitrepo{ba-doltp} repository and has all library dependencies in the \texttt{vendor} directory.
 
+    \item \textbf{The \LaTeX~sources for this thesis} are available in the \texttt{ba-thesis} repository.
+
     \item \textbf{The scripts to perform the benchmark runs, the raw result data and the IPython notebook used to render the evaluation figures.}
-        It is located in the same repository as the \latex sources for this thesis, in the \texttt{thesis/evaluation}.
+        They are located in the \texttt{ba-thesis} repository, in the \texttt{thesis/evaluation} subdirectory.
 
     \item \textbf{Details on the hardware used for the evaluation.}
-        We provide the output of some standard hardware information tools in the \texttt{thesis/evaluation/hw} directory, along with the shell script to generate the output.
+        We provide the output of some standard hardware information tools in the \texttt{ba-thesis} repository in the \texttt{thesis/evaluation/hw} subdirectory, along with the shell script to generate the output.
 
 \end{itemize}
 
