@@ -1,0 +1,41 @@
+worker: 10.23.42.40:22345
+
+# mine pas=1000
+#mysqlcommand: [ "./osv.sh", "osvs/v0.24-520-g29f0cdc5.img", "2-7", "" ]
+# mine pas=10
+#mysqlcommand: [ "./osv.sh", "osvs/v0.24-521-gda3cde15.img", "2-7", "--stage.max_assignment_age=10000" ]
+# mine pas=10, mwait
+#mysqlcommand: [ "./osv.sh", "osvs/v0.24-522-g470b8ccb.img", "2-7", "--stage.max_assignment_age=10000" ]
+
+# upstream_nospin pas=10
+#mysqlcommand: [ "./osv.sh", "osvs/upstream_v0.24-470-gf9eedad4.img", "2-7", "" ]
+# upstream pas=10
+#mysqlcommand: [ "./osv.sh", "osvs/upstream_v0.24-469-g3b708995.img", "2-7", "" ]
+
+# docker
+#mysqlcommand: [ "bash", "-c", "sleep 30d" ]
+
+# scratch
+mysqlcommand: [ "./osv.sh", "/home/cschwarz/osv_upstream/build/last/usr.img", "2-7", "" ]
+#mysqlcommand: [ "./osv.sh", "/home/cschwarz/osv/build/last/usr.img", "2-7", "--idle_mwait=1" ]
+#mysqlcommand: [ "./osv.sh", "osvs/mine_fixed_cores.img", "2-7", "" ]
+
+# l2
+#perfcommand: [ "./perf_events.sh", "l2_rqsts.all_code_rd l2_rqsts.code_rd_miss l2_rqsts.miss l2_rqsts.references", "ukHG", "0-7" ]
+# td 
+#perfcommand: [ "./perf_events.sh", "cpu_clk_unhalted.thread idq_uops_not_delivered.core uops_issued.any uops_retired.retire_slots int_misc.recovery_cycles", "ukHG", "0-7" ]
+perfcommand: [ "./perf_events.sh", "ref-cycles cpu_clk_unhalted.thread idq_uops_not_delivered.core uops_issued.any uops_retired.retire_slots int_misc.recovery_cycles l2_rqsts.all_code_rd l2_rqsts.code_rd_miss l2_rqsts.miss l2_rqsts.references", "ukHG", "2-7" ]
+#perfcommand: [ "bash", "-c", "sleep 30d" ]
+
+tpcc:
+    seconds: 40
+    terminals: 12
+    scalefactor: 2
+    mysql:
+        host: 10.23.42.10
+        #host: 10.23.42.35
+        port: 3306
+        user: root
+        password: ""
+        db: tpcc
+

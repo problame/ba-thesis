@@ -1160,7 +1160,7 @@ The PAS consists of an infinite loop that self-tunes the CPU time it consumes th
 It scans pages for $t$\% and then sleeps for $100-t$\% of the time it runs, where $t$ depends on a decaying average of the page access rate.
 The loop runs at a hard-coded frequency of 1000Hz.
 While this value is respected in the formula to calculate the maximum time the PAS may run before going to sleep, changing it affects the effective amount of work done by the PAS:
-For example, when choosing 10 instead of 1000Hz as the PAS frequency, each invocation of the PAS can in theory run up to 100 times longer, but since the entire page cache may be scannable in a shorter time, the PAS may go back to sleep early.
+For example, when choosing 10Hz instead of 1000Hz as the PAS frequency, each invocation of the PAS can in theory run up to 100 times longer, but since the entire page cache may be scannable in a shorter time, the PAS may go back to sleep early.
 As a side-effect, a reduced frequency also lowers the temporal resolution of the page usage data available to the ARC.
 
 Our core allocation policy does not handle this situation well:
@@ -1171,34 +1171,25 @@ Whenever the core allocation policy assigns cpu0 to a stage, that stage's thread
 %Within a stage, we always enqueue a thread to the core with the shortest runqueue.
 %At a high-frequency of PAS invocations (1000Hz), highto a  core load-balance b
 Furthermore, the high frequency of PAS invocations (1000Hz) is detrimental to cache performance on cpu0:
-The PAS thread's instruction working set is disjoint from the stage threads' working set and given that the latter is chosen to just fit the CPU-private cache, the frequent scheduling of the PAS thread causes thrashing of the private cache of cpu0.
+The PAS thread's instruction working set is disjoint from the stage's threads' working set and given that the latter is chosen to just fit the CPU-private cache, the frequent scheduling of the PAS thread causes i-cache misses in the private cache of cpu0.
 %At first, we must emphasize that the use of non-preemptive round-robin scheduling per CPU is not problematic because the PAS thread consistently sleeps after less than 500 $\mu s$ of execution.
 %However, a file-system intensive application like MySQL drives $t$ toward $20\%$ of targeted CPU time, thus leaving only 80\% of CPU 0's  time to the stage's threads.
 
-We can quantify the above effect using the TPC-C benchmark by running the single-terminal configuration against MySQL on OSv with 1000Hz and 10Hz PAS frequency.
+We can quantify the effect outlined above by comparing throughput and cache behavior with 1000Hz vs 10Hz PAS frequency.
 The results are shown in Figure~\ref{fig:ch:di:osvpageaccessscannerbench}:
-\todo{data in table}
-We observe that our solution experiences a far more significant speedup compared to upstream OSv.
-More importantly, the speedup correlates with an increase in cache hits.
-We interpret the increased cache hits as a confirmation of our assumption that the frequent invocations of the PAS thrash the L2-cache of cpu0 and hence lead to frequent eviction of the instruction working set of the stage assigned to that core.
+With PAS frequency reduced to 10Hz, our solution achieves 17\% higher throughput compared to 1000Hz.
+Upstream in contrast is much less affected with only 10\% higher throghput at 10Hz PAS frequency.
+The differences in throughput are visible in the respective code miss ratios:
+Whereas our solution incurs 3 percent points fewer code misses with 10Hz, upstream OSv's code misses increase by 1 percent point.
 
-\begin{figure}[h]
+\begin{figure}
 \centering
-\begin{tabular}{| r | c | c | c | c |}
-    \hline
-    \text{Build} & \multicolumn{2}{|c|}{Upstream} & \multicolumn{2}{|c|}{Our Solution} \\
-    \hline
-    Frequency  & req/sec & L2 i-hits & req/sec & L2 i-hits \\
-    \hline
-    \text{1000 Hz} & 180 & X \% & 150 & X \%  \\
-    \hline
-    \text{10 Hz} & 225 & X \% & 220 & X \% \\
-    \hline
-    \hline
-    \textbf{Improvement} & \textbf{25\%} & \textbf{X\%} & \textbf{46\%} & \textbf{X\%} \\
-    \hline
-\end{tabular}
-\caption{The effect of changing the PAS frequency on TPC-C throughput and L2 code hit ratio. Speedup in throughput correlates with L2 i-cache hit rate and reduc.
+\resizebox{0.8\linewidth}{!}{
+        \input{\evalfigpath{pas_freq_effect.tex}}
+}
+\caption{The effect of 10Hz vs. 1000Hz PAS frequency on TPC-C throughput and L2 code misses.
+    Reducing the PAS frequency reduces code misses for our solution, resulting in increased throughput.
+    The results were produced with enabled MWAIT in the idle thread and 12 TPC-C terminals.
 }
 \label{fig:ch:di:osvpageaccessscannerbench}
 \end{figure}
