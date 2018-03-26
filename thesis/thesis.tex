@@ -1073,16 +1073,16 @@ When requirements change to $r'$ and we need to update the assignment to $a_{r'}
 %Therefore, we let ${r' \mathrel{+}= \floor{f}}$ and start a new iteration of the loop using ${p = norm(f - \floor{f})}$ and ${C = C - \sum_{i = 1}^{S} \floor{f}_i}$.
 %If ${\floor{f} = \begin{smallmatrix}( 0 & 0 & \dots & 0 )\end{smallmatrix}}$, we shift priorities in $p$ from lowest to highest-priority stage such that after at most $C$ iterations, all CPUs are distributed.~\todo{pseudocode?}
 
-We compute the requirements vector as follows:
-At first, we gather the current stage load of every stage and build a requirements vector proportional to the load distribution.
-To avoid jitter, we then feed this vector through exponentially-decaying moving average filter which advances every time we compute a new core assignment, thus every \lstinline[style=figurecpp]{max_assingment_age}.
+We compute the requirements vector following the algorithm in Figure~\ref{fig:di:pol:reqvectoralg}:
+At first, we collect the current stage load of every stage in the stage-load-vector.
+To smoothen out spikes spikes due to frequent switching of threads between blocked and runnable state, we then feed this vector through exponentially-decaying moving average filte .
+We compute the requirements vector proportional to the load distribution of the smoothened stage-load-vector.
 By normalizing the filter result vector to the number of available CPU cores, we get an ideal floating point count of cores to be assigned to each stage.
 However, since cores can only be assigned at integer quantities, we perform element-wise integer division on the normalized vector, the divisor being the number of assignable cores.
 The integer quotient is then a vector that contains the numbers of directly assignable cores, which we add to the new requirements vector.
 The remainders vector in turn contains the left-over fractions of CPU per stage.
 We distribute the still unassigned CPU cores by repeating the above procedure with the remainders vector until all cores are assigned.
 To ensure that this loop terminates, we prioritize cores with higher fractions of CPU cores.
-The algorithm is given in pseudo-code in Figure~\ref{fig:di:pol:reqvectoralg}.
 
 \begin{figure}
 \centering
@@ -1303,7 +1303,7 @@ The system is equipped with 32 GiB of memory consisting of $4*8$ GiB DDR4 DIMMs 
 The CPU's cache hierarchy consists of a 20MiB shared, inclusive, 20-way set associative L3 cache, private unified 256KiB L2 caches and private separate 32KiB L1-d and L1-i caches.
 All private caches are 8-way set-associative.
 Via the BIOS, we disable SMT because the core allocation policy does not support it (see Section~\ref{ch:concl:fw}).
-We also disable automatic switching to lower C-states to remove latency jitter.
+We also disable automatic switching to lower C-states to reduce latency jitter due to increased wake-up time from low-power states.
 A more detailed dump of the hardware configuration is available in the appendix (Chapter ~\ref{ch:appendix}).
 
 We use the Fedora 27 Linux distribution with Linux kernel version 4.13.9 (Fedora package \lstinline[style=figurecpp]{4.13.9-300.fc27.x86_64}) as the machine operating system.
@@ -1752,7 +1752,7 @@ As designed, we only see the cores with a lower index switch stages frequently w
 Since we do not have a precise model of the opportunity costs of thread migration vs. cache thrashing, we consider avoiding flapping of cores a positive result.
 
 At last, we take a look at the runtime of the entire core allocation algorithm in Figure~\ref{fig:eval:capimpl:runtime}:
-The runtime is obviously independent of the number of threads in the system (around 1$\mu s$) but shows significant jitter.
+The runtime is obviously independent of the number of threads in the system (around 1$\mu s$) but exhibits a very high standard deviation.
 Given the fact that the runtime is amortized over 20ms, less than 0.1\% of CPU time will be spent on the scheduling algorithm.
 However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ asymptotic runtime complexity of \emph{minimal transition} algorithm in this section, since the evaluation setup is fixed to $S = 3$ stages and $C = 6$ cores.
 
@@ -1762,7 +1762,7 @@ However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ a
         \resizebox{\linewidth}{!}{
             \input{\evalfigpath{cap_assignment_by_stage_load.pgf}}
         }
-        \caption{Stage load and resulting requirements vector over time. The exponentially-decaying average filter smoothens the high jitter.}
+        \caption{Stage load and resulting requirements vector over time. The exponentially-decaying average filter smoothens the very spiky stage load profile.}
         \label{fig:eval:capimpl:cabystageload}
     \end{subfigure}
     \par\par\hfill
