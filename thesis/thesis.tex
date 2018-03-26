@@ -1406,7 +1406,8 @@ More than 66\% of private L2 cache misses in both Linux and Upstream OSv are due
     }
     \caption{
         Top-down analysis top-level breakdown of MySQL under the TPC-C benchmark.
-        The true frontend-boundedness is only visible when removing any spinning, which we did in Upstream OSv.
+        The true frontend-boundedness is only visible when removing any spinning, which we only did in Upstream OSv.
+        The break-down is similar to the observations made by \citeauthor*{kanev2015profiling} (Section~\ref{ch:relwork:profiling}).
     }
     \label{fig:eval:stageapi:mysqltd}
 \end{figure}
@@ -1418,7 +1419,7 @@ More than 66\% of private L2 cache misses in both Linux and Upstream OSv are due
     }
     \caption{
         L2 cache misses of MySQL under the TPC-C benchmark.
-        More than 66\% of of cache misses are due to code reads.
+        More than 66\% of all L2 cache misses are due to code reads, confirming the assumption that MySQL's instruction working set does not fit into the private cache of contemporary processor cores.
     }
     \label{fig:eval:stageapi:mysqll2}
 \end{figure}
@@ -1469,7 +1470,9 @@ git diff --stat 38e2b4d1fe7564b8e1a0d0f0eeb7f542d0d534b6
  storage/perfschema/pfs.cc |  3 +++
  9 files changed, 54 insertions(+), 2 deletions(-)
 \end{lstlisting}
-\caption{The Git diff statistics of all changes to upstream MySQL required to insert the stage-switching points computed by simulation}
+\caption{The Git diff statistics of all changes to upstream MySQL required to insert the stage-switching points computed by the simulation approach.
+    They amount to only 0.0036\% of the MySQL codebase.
+}
 \label{fig:eval:api:diffstat}
 \end{figure}
 
@@ -1524,6 +1527,8 @@ We achieve more than 2x the speedup with busy-waiting compared compared to MWAIT
         The error bars indicate the standard deviation over the 8 benchmark runs per configuration.
         The legend entries in top-to-bottom order correspond to the bars in left-to-right order.
         The table below shows the speedup with upstream OSv as the baseline.
+        We observe an up to 22\% speedup with our solution with busy-waiting and a 9\% speedup when using MWAIT in the idle thread.
+        The \lstinline[style=figurecpp]{max_assignment_age} parameter (left item in parentheses for our solution) does not significantly affect the performance of our solution.
     }
     \label{fig:eval:perf:throughput}
 \end{figure}
@@ -1540,7 +1545,8 @@ However, even at 60 terminals, the difference amounts to merely 15ms at mean lat
     \caption{
         TPC-C request latency of MySQL on Upstream OSv vs. our solution.
         The error bars indicate the standard deviation over the 8 benchmark runs per configuration.
-        Note that the y-axis starts at 850 msec.
+        Our solution achieves up to 15ms lower request latency at 60 terminals.
+        Note however that this is only 1.5\% faster than upstream and that the y-axis in the diagram starts at 850msec.
     }
     \label{fig:eval:perf:reqlat}
 \end{figure}
@@ -1680,6 +1686,7 @@ Since busy-waiting in upstream and our solution have the same propagation time t
     \caption{
         Histogram of \texttt{hopper} migration latencies with 200ns buckets, bars drawn at the center of each bucket.
         The last row shows the exact mean values.
+        Our solution shows more than 70\% lower migration latency and is less affected by halting / MWAIT than upstream.
     }
     \label{fig:eval:mig:hopperdists}
 \end{figure}
@@ -1715,7 +1722,9 @@ the relationship of MWAIT to migration latency and throughput requires further i
     }
     \caption{
         TPC-C throughput achieved with fixed core allocation over varying number of terminals.
-        The error bars represent standard deviation.
+        The error bars represent standard deviation over 8 benchmark runs.
+        Our solution increases single-terminal throughput by 8 -- 9\% and up to 18\% for multi-terminal with busy-waiting.
+        \texttt{upstream pre-spin} is very similar to \texttt{upstream busy-waiting}, whereas \texttt{upstream nospin} is almost 50\% slower, showing that \texttt{upstream pre-spin} practically never actually halts the CPU.
     }
     \label{fig:eval:mig:tpcc}
 \end{figure}
