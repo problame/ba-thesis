@@ -647,7 +647,7 @@ Given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per sourc
 At every reschedule, a CPU then drains all incoming queues into its runqueue.
 Each CPU is guaranteed to have an always runnable idle thread that spins for a short time and HALTs the CPU if no other runnable threads are in the runqueue.
 Thus, a source CPU may need to send an inter-processor-interrupt (IPIs) to the target CPU after enqueuing the migrated thread.
-For this purpose, each CPU has a bitmask, each bit representing one source CPU / wakeup queue:
+For this purpose, each CPU has a bitmask, each bit representing one source CPU / wake-up queue:
 The source CPU will atomically set its bit in the target CPU's bitmask and only send the IPI if the bit was not set before, avoiding unnecessary flooding the target CPU with IPIs. ~\cite{osvGit,osvMain}
 
 Migrating runnable, but not currently running threads, is easy in this model:
@@ -867,7 +867,7 @@ Therefore, instead of replacing the upstream mechanism and extending the OSv sch
 we implemented above solution as a supplement.
 As such, for our implementation, the \emph{incoming migrations queue} referred to above is different from the \lstinline[style=figurecpp]{incoming_wakeups} queues from Section~\ref{ch:di:osv:sched}:
 Our current implementation uses a lock-free multi-producer-single-consumer queue which we originally used to poll for changes in the idle thread.
-The addition of \textsc{\texttt{mwait}} however required waiting for changes to the upstream incoming wakeups queue and our queue simultaneously.
+The addition of \textsc{\texttt{mwait}} however required waiting for changes to the upstream incoming wake-ups queue and our queue simultaneously.
 We solved this problem by also setting upstream mechanism's bitmask from the stage-switching code path and by using \textsc{\texttt{mwait}} on its address.
 Combined with the changes we present in the next Section, we want to merge the two mechanisms in the future, thereby de-duplicating the dequeuing code in the idle thread.
 
@@ -898,7 +898,7 @@ Utilizing all cores of a multi-core system is thus trivial in theory:
 When a blocked thread is woken up, we find a CPU that has that thread's current stage's code in its cache and enqueue the woken-up thread's TCB into that CPU's runqueue.
 
 However, in practice, this simple concept is complicated by the realities of the OSv scheduler implementation.
-Let us first look at the wakeup-related state transitions that a thread might go through in upstream OSv, as depicted in Figure~\ref{fig:di:wake:upstreamstates}:
+Let us first look at the wake-up-related state transitions that a thread might go through in upstream OSv, as depicted in Figure~\ref{fig:di:wake:upstreamstates}:
 The most common case will be that a thread goes to sleep, waiting on some predicate to become true, for example that a timer has expired or that it acquired a mutex.
 The \textit{running} thread will then transition synchronously to the \textit{waiting} state and schedule out.
 Let us now imagine that another thread makes the predicate become true.
@@ -936,7 +936,7 @@ Figure~\ref{fig:di:wake:spreadstates} presents the resulting state transition di
 \begin{figure}
     \centering
     \includegraphics[width=\textwidth]{fig_build/state_chart_post_spread}
-    \caption{Modified OSv wakeup-related thread state transitions: All states are unambiguous about whether the thread is still running or completed scheduling out.
+    \caption{Modified OSv wake-up-related thread state transitions: All states are unambiguous about whether the thread is still running or completed scheduling out.
         Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.
     }
     \label{fig:di:wake:spreadstates}
@@ -1357,7 +1357,7 @@ We provide the following alternatives and will refer to them by name for the res
 \begin{description}[labelwidth=3em,leftmargin=3.5em]
     \item[\texttt{busy}] Busy-waiting for incoming thread migrations in the \lstinline[style=figurecpp]{incoming_wakeups} queue as part of the upstream thread migration mechanism (see Section~\ref{ch:di:osv:sched}).
     \item[\texttt{halt}] The default behavior in upstream OSv: Spin for a short time, then issue the HALT instruction.
-    \item[\texttt{mwait}] Instead of using HALT, use MONITOR and MWAIT to wait for changes to the incoming wakeups bitmask. Do not spin before MWAIT.
+    \item[\texttt{mwait}] Instead of using HALT, use MONITOR and MWAIT to wait for changes to the incoming wake-ups bitmask. Do not spin before MWAIT.
 \end{description}
 The difference between \texttt{mwait} and \texttt{halt} is that the latter causes an exit to the hypervisor while the former does not.
 To the hypervisor, \texttt{mwait} will thus appear to consume 100\% of CPU time.
@@ -1643,7 +1643,7 @@ The use of MWAIT does not correlate with the cache behavior of our solution, i.e
 
 The analysis in the previous section shows that we are successfully spreading the instruction working set of MySQL, which we accomply through thread migration.
 In Section~\ref{ch:di:mig}, we have presented a thread migration mechanism that we claim to be faster than the upstream OSv facility.
-Additionally, we refactored the wake-up mechanism to allow thread migration on wakeup, enabling immediate dispatch of woken up thread to any of its current stage's cores (see Section~\ref{ch:di:wake}).
+Additionally, we refactored the wake-up mechanism to allow thread migration on wake-up, enabling immediate dispatch of woken up thread to any of its current stage's cores (see Section~\ref{ch:di:wake}).
 In this section, we validate that we reduced migration latency with our migration mechanism, its effect on throughput and the additional speedup achieved through thread migration on wake-up.
 
 As a baseline for comparison, we implement the stage API in upstream OSv using the upstream thread migration primitives:
