@@ -451,7 +451,7 @@ However, we cannot find a concrete proposal ready for implementation.
 A Linux-based proof-of-concept implementation at the KIT OS group combines the idea of staged execution, cohort scheduling and computation spreading into a C API that allows for intuitive conversion of existing code bases to staged execution:
 The application developer manually identifies stages and inserts library calls into application code for switching the current stage.
 Each CPU core is assigned one or more stages and each time a thread switches to a new stage, it is migrated to a core assigned to that stage, benefiting from a warm i-cache.
-Obviously, this approach targets applications that employ thread-based concurrency, i.e. the multi-threaded server architecture outline in Section~\ref{ch:relwork:concmod}, since the stage-switching is embedded into the control flow of the request handler and thus not explicitly modeled like in SEDA (see Section~\ref{ch:relwork:seda}).
+Obviously, this approach targets applications that employ thread-based concurrency, i.e., the multi-threaded server architecture outline in Section~\ref{ch:relwork:concmod}, since the stage-switching is embedded into the control flow of the request handler and thus not explicitly modeled like in SEDA (see Section~\ref{ch:relwork:seda}).
 
 Fast thread migration mechanism is required for this technique to succeed
 --- otherwise, the performance benefits of always-warm caches per stage are destroyed by the migration time.
@@ -626,7 +626,7 @@ When the VM starts, OSv establishes a \emph{single virtual address space} and dy
 This technique allows dynamically linked applications built on Linux to execute unmodified on OSv, unless they depend on facilities intentionally not provided by OSv such as forking new processes.
 The single trust domain property furthermore allows omitting all privilege level switching between OSv and the application.
 In summary, the removed user-kernel-boundary, syscall overhead and context \& privilege level switching improves application performance significantly without any application code changes required.
-However, if application developers choose to specifically target OSv, more efficient system APIs provide further optimization, e.g. zero-copy networking as opposed to the traditional socket API.~\cite{osvMain}
+However, if application developers choose to specifically target OSv, more efficient system APIs provide further optimization, e.g., zero-copy networking as opposed to the traditional socket API.~\cite{osvMain}
 
 While OSv incorporates pre-existing components for ACPI, the filesystem and originally the network stack, the core system is implemented in C++11.
 The codebase of ca. $400000$~lines of code is very small compared to the 20~million lines of Linux 4.13, % both code and comments
