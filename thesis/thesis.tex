@@ -611,11 +611,6 @@ When a thread uses the system API to switch to a stage $S$, we choose the least-
 When a thread blocks, it no longer counts toward the load of stage but does not lose the association to it.
 Thus, when a blocked thread is woken up again, the \emph{waker} simply uses the current core allocation to choose a suitable core for the woken thread and enqueue the still-sleeping thread into that core's runqueue.
 
-\begin{figure}[h]
-    \missingfigure{visualize the solution}
-    \caption{TODO}
-\end{figure}
-
 The promise behind the approach described above is the same as in computation spreading and the proof-of-concept implementation at the KIT OS group (Chapter~\ref{ch:relwork}):
 \textbf{By dedicating CPU cores and hence their private caches to a stage and by scheduling threads exclusively on the cores of their current stages, the i-cache always contains the instruction working set of all threads in the CPU's runqueue.}
 This reduces instruction cache misses, pipeline stalls and mispredicted branches, resulting in faster execution of the stage's code and cheaper context switches on the CPU.
@@ -632,6 +627,7 @@ In Section~\ref{ch:di:wake}, we explain the details involved in implementing thr
 Section~\ref{ch:di:pol} then presents the CPU core allocation policy.
 Where appropriate, we refer to the relevant commits in the Git repository of our modified version of OSv which can be obtained from the the appendix.
 
+\clearpage %manually
 \section{The OSv Library Operating System}\label{ch:di:osv}
 We implement our stage-aware scheduling solution in the OSv \emph{library operating system}, which breaks up the traditional divide between the kernel and applications:
 Traditionally, an operating system provides abstractions from the physical hardware and multiplexes it among \emph{multiple} untrusting users and applications, providing protection and isolation at various levels.
@@ -1591,9 +1587,9 @@ Specifically, we record L2 cache events as well as those events required to comp
         \input{\evalfigpath{wsspread_l2_speedup.tex}}
     }
     \caption{
-        L2 cache misses of MySQL under TPC-C benchmark with 1 and 50 TPC-C terminals.
-        The table below shows the relative amount of code and data misses with \emph{Upstream OSv (halt)} as a baseline.
-        The influence of instruction working set spreading is visible in a 65\% reduction of L2 code misses with our solution.
+        L2 cache misses with 1 and 50 TPC-C terminals.
+        The table below shows the relative amount of code and data misses for 50 terminals with \emph{Upstream OSv (halt)} as a baseline.
+        The 65\% reduction of L2 code misses shows the effectiveness of instruction working set spreading.
     }
     \label{fig:eval:spreading:l2}
 \end{subfigure}
@@ -1613,7 +1609,7 @@ Specifically, we record L2 cache events as well as those events required to comp
     \label{fig:eval:spreading:td}
 \end{subfigure}
 \par\bigskip
-\caption{Validation of instruction working set spreading through CPU performance counters.}
+\caption{Validation of instruction working set spreading using CPU performance counters during the TPC-C benchmark.}
 \end{figure}
 
 %However, for a fair comparison with regards to the Top-Down metrics, we must modify the idle thread implementation of upstream OSv:
