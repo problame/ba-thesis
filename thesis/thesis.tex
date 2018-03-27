@@ -87,7 +87,21 @@
 \input{kit_style/declaration}
 
 \chapter{Abstract}
-\chapter{Acknowledgments}
+Scalable high-performance network servers are required for today's distributed infrastructure.
+While event-driven concurrency models proposed in the early 2000s provide better scalability properties than multi-threaded servers in practice,
+many legacy applications still follow the multi-threaded model where each request is handled by a dedicated operating system thread.
+Recent profiling at Google suggests that the instruction working set of many server applications does not fit into the private i-caches of contemporary processors, causing underutilization of their super-scalar out-of-order pipeline.
+In a multi-threaded server with an oversized instruction working set, a context switch between two request-handler threads is thus likely to cause i-cache misses and subsequent pipeline stalls.
+
+In this thesis, we analzye existing approaches to optimize the cache behavior of network servers.
+Based on proof-of-concept work at the KIT OS group, we then present a thread scheduler design that uses fast thread migration to spread the instruction working set of a process over the private caches of all available CPU cores.
+From applications, we only require adoption of an unintrusive user-space API that allows partitioning the request-handling code path into \emph{stages} which fit the private i-caches of the targeted CPU.
+%In contrast to previous approaches in the field, the API allows spreading the working set at arbitrary positions in the application code.
+Further, we overcome limitations of the proof-of-concept with regards to multi-client and multi-core scalability by implementing our design directly in the thread scheduler and by proposing a policy that allocates CPU cores dynamically among stages, thereby taking cache residency into account.
+
+We evaluate the design and its implementation in the OSv library operating system by adapting the MySQL database management system to our solution.
+Our experiments show that we achieve up to 22\% higher throughput caused by a 65\% reduction of L2 i-cache misses under the TPC-C benchmark.
+Unlike previous approaches, we do not sacrifice request latency for this improvement.
 
 \mainmatter
 \cleardoublepage
@@ -96,7 +110,7 @@
 \tableofcontents
 
 \chapter{Introduction}
-Network servers are of ever-increasing importance in today's cloud-based distributed infrastructure, handling requests from clients at high degrees of concurrency.
+Network servers are of ever-increasing importance in today's infrastructure, handling requests from clients at high degrees of concurrency.
 A common implementation pattern is a \emph{sequential} handler routine that processes each request, consisting of logical stages such as protocol handling, decoding/encoding and actual business logic.
 Concurrency is achieved by executing the handler code per connection in separate operating system thread -- either by spawning a thread per request or by using a thread pool.
 The sequential handler implementation is simple to follow for programmers and abstractions for the aforementioned threading models are available in virtually any programming language and operating system.~\cite{flashwebsrv,c10k}
@@ -1347,7 +1361,6 @@ An example for the impact of spinning can be seen in Figure~\ref{fig:eval:stagea
 When referring to \emph{upstream OSv} without further qualifiers, we mean upstream OSv with the \texttt{halt} configuration.
 For top-down comparison, we use \texttt{mwait} in both our solution and upstream.
 
-\clearpage
 \section{Adopting the Stage API in MySQL}\label{ch:eval:stageapi}
 MySQL is a widely-used open source relational database management system written primarily in C/C++.
 While development started in 1994, the project continues to evolve until today.
