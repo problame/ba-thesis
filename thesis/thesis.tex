@@ -2,13 +2,16 @@
 \usepackage[utf8]{inputenc}
 \usepackage[inline]{enumitem}
 \usepackage{parskip} % disable indentation for new paragraphs, increased margin-bottom instead
-\usepackage[american,ngerman]{babel}
+\usepackage[ngerman,american]{babel}
 \usepackage{csquotes}
 
 \usepackage{kit_style/kitthesiscover}
 
 \usepackage[style=alphabetic]{biblatex}
 \addbibresource{bib.bib}
+\setcounter{biburlnumpenalty}{100}
+\setcounter{biburllcpenalty}{7000}
+\setcounter{biburlucpenalty}{8000}
 
 \usepackage[%dvipdfm,
    pdfauthor={Christian Schwarz},
@@ -1955,6 +1958,7 @@ To facilitate orientation in the codebase, we provide the the following overview
 \cleardoublepage
 \phantomsection
 \addcontentsline{toc}{chapter}{Bibliography}
+\emergencystretch=1em
 \printbibliography
 
 \end{document}
