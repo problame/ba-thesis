@@ -1,0 +1,12 @@
+\begin{tabular}{lrr}
+\toprule
+{} &  L2 code misses / request &  L2 data misses / request \\
+build                &                           &                           \\
+\midrule
+Our Solution (busy)  &                      0.35 &                      1.02 \\
+Our Solution (mwait) &                      0.34 &                      1.02 \\
+Upstream OSv (busy)  &                      0.93 &                      0.99 \\
+Upstream OSv (halt)  &                      1.00 &                      1.00 \\
+Upstream OSv (mwait) &                      0.93 &                      1.00 \\
+\bottomrule
+\end{tabular}

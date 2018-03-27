@@ -1,0 +1,11 @@
+\begin{tabular}{llrrrr}
+\toprule
+                     &    &  frontend\_bound &  bad\_speculation &  backend\_bound &  retiring \\
+build & terminals &                 &                  &                &           \\
+\midrule
+Our Solution (mwait) & 1  &            0.31 &             0.04 &           0.44 &      0.22 \\
+                     & 50 &            0.30 &             0.04 &           0.45 &      0.22 \\
+Upstream OSv (mwait) & 1  &            0.58 &             0.05 &           0.18 &      0.20 \\
+                     & 50 &            0.53 &             0.06 &           0.21 &      0.21 \\
+\bottomrule
+\end{tabular}
