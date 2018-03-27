@@ -51,6 +51,7 @@
 
 \usepackage{subcaption}
 
+\usepackage{placeins}
 
 \lstdefinestyle{figurecpp}{
   belowcaptionskip=1\baselineskip,
@@ -665,7 +666,7 @@ Load-balancing is implemented by a periodically-invoked per-core load-balancer t
 OSv implements thread migration through a set of lock-free single-producer-single-consumer queues:
 Given $N$ CPUs, each CPU has $N$ \texttt{incoming\_wakeup} queues, one per source CPU, containing pointers to the TCBs of the threads being migrated.
 At every reschedule, a CPU then drains all incoming queues into its runqueue.
-Each CPU is guaranteed to have an always runnable idle thread that spins for a short time and HALTs the CPU if no other runnable threads are in the runqueue.
+Each CPU is guaranteed to have an always runnable idle thread that spins for a short time and halts the CPU if no other runnable threads are in the runqueue.
 Thus, a source CPU may need to send an inter-processor-interrupt (IPIs) to the target CPU after enqueuing the migrated thread.
 For this purpose, each CPU has a bitmask, each bit representing one source CPU / wake-up queue:
 The source CPU will atomically set its bit in the target CPU's bitmask and only send the IPI if the bit was not set before, avoiding unnecessary flooding the target CPU with IPIs. ~\cite{osvGit,osvMain}
@@ -815,7 +816,7 @@ We defer discussion of the core allocation policy to Section~\ref{ch:di:pol} and
 For a net benefit from spreading the instruction working set, the performance gained through always warm i-caches must outweigh the cost of thread migration.
 One significant contributor to the latter is migration latency, which is the reason why we require a low-latency mechanism.
 Upstream OSv's uses short-lived helper-threads for synchronous thread migration and inter-processor interrupts (IPIs) to notify the target CPU about incoming migrations.
-The IPIs are necessary because the target CPU may be temporarily \textsc{\texttt{halt}}ed in the idle thread.
+The IPIs are necessary because the target CPU may be temporarily halted in the idle thread.
 \textbf{We state that the upstream mechanism is unsuitable for our use-case of frequent stage-switching:}
 At first, recent measurements on AMD systems have shown that IPI propagation on bare-metal systems is ~1700ns. % ipiLatencyPopcornLinux (2,2Ghz machine, 7501 Round-Trip-Time, sec 6.2.2) (7501×1000000÷2200000000)÷2
 For OSv, we assume significant overhead due to virtualization, which we will further investigate in Section~\ref{ch:eval:mig}.
@@ -869,13 +870,14 @@ Eventually, the target CPU will dequeue $T$ again, observe from its state that i
     \label{fig:di:mig}
 \end{figure}
 
-The other issue we face with our migration mechanism is that in upstream OSv, the idle thread puts CPUs to sleep using the \textsc{\texttt{halt}} instruction.
+The other issue we face with our migration mechanism is that in upstream OSv, the idle thread halts CPUs using the \textsc{\texttt{hlt}} instruction.
 This works in upstream due to the use of IPIs which wake the CPU up again, but we want to avoid IPIs in our solution and therefore provide two boot-time configurable alternatives:
 First, the idle thread can busy-wait for changes to the incoming migrations queue.
 Alternatively, it can use the \textsc{\texttt{monitor}} and \textsc{\texttt{mwait}} instructions to wait for changes to the queue while keeping the core in a low power state.
 Both options have benefits and downsides:
 Busy-waiting offers 16\% lower migration latency (see Section~\ref{ch:eval:mig}) but consumes more power, which is undesirable for technical (dark silicon), economical (increased cost) and ecological reasons.
 \textsc{\texttt{mwait}} in combination with \emph{simultaneous multithreading} (SMT) in contrast allows the core to switch to another hardware thread, which also opens a window for increased performance.~\cite{intelSDMMWAIT,darkSilicon}
+Neither of the alternatives cause an exit to the hypervisor, to which the VM will appear 100\% busy.
 %Since our core allocation policy currently does not support SMT \todo{ref limitations / related work} ...
 
 At last, we want to provide some implementation details that we omitted for easier understanding of the design:
@@ -1200,7 +1202,7 @@ Whereas our solution incurs 3 percent points fewer code misses with 10Hz, upstre
 }
 \caption{The effect of 10Hz vs. 1000Hz PAS frequency on TPC-C throughput and L2 code misses.
     Reducing the PAS frequency reduces code misses for our solution, resulting in increased throughput.
-    The results were produced with enabled MWAIT in the idle thread and 12 TPC-C terminals.
+    The results were produced with enabled \texttt{\textsc{mwait}} in the idle thread and 12 TPC-C terminals.
 }
 \label{fig:ch:di:osvpageaccessscannerbench}
 \end{figure}
@@ -1271,7 +1273,6 @@ We show the advantages of our thread migration mechanisms in Section~\ref{ch:eva
 The core allocation algorithm and its influence on performance is then validated separately in Section~\ref{ch:eval:polidea} and \ref{ch:eval:polperf}.
 We conclude with a discussion of the results in Section~\ref{ch:eval:discussion}.
 
-\clearpage
 \section{Evaluation Setup}\label{ch:eval:setup}
 % Intel(R) Xeon(R) CPU E5-2618L v3 @ 2.30GHz
 %   8 cores, 2 logical processors per core
@@ -1352,8 +1353,8 @@ Specifically, we add a kernel command line parameter that allows to select the a
 We provide the following alternatives and will refer to them by name for the rest of this chapter:
 \begin{description}[labelwidth=3em,leftmargin=3.5em]
     \item[\texttt{busy}] Busy-waiting for incoming thread migrations in the \lstinline[style=figurecpp]{incoming_wakeups} queue as part of the upstream thread migration mechanism (see Section~\ref{ch:di:osv:sched}).
-    \item[\texttt{halt}] The default behavior in upstream OSv: Spin for a short time, then issue the HALT instruction.
-    \item[\texttt{mwait}] Instead of using HALT, use MONITOR and MWAIT to wait for changes to the incoming wake-ups bitmask. Do not spin before MWAIT.
+    \item[\texttt{halt}] The default behavior in upstream OSv: Spin for a short time, then issue the \texttt{\textsc{hlt}} instruction.
+    \item[\texttt{mwait}] Instead of using \texttt{\textsc{hlt}}, use \texttt{\textsc{monitor}} and \texttt{\textsc{mwait}} to wait for changes to the incoming wake-ups bitmask. Do not spin before \texttt{\textsc{mwait}}.
 \end{description}
 The difference between \texttt{mwait} and \texttt{halt} is that the latter causes an exit to the hypervisor whereas the former does not.
 To the hypervisor, \texttt{mwait} will thus appear to consume 100\% of CPU time.
@@ -1365,6 +1366,7 @@ An example for the impact of spinning can be seen in Figure~\ref{fig:eval:stagea
 When referring to \emph{upstream OSv} without further qualifiers, we mean upstream OSv with the \texttt{halt} configuration.
 For top-down comparison, we use \texttt{mwait} in both our solution and upstream.
 
+\FloatBarrier
 \section{Adopting the Stage API in MySQL}\label{ch:eval:stageapi}
 MySQL is a widely-used open source relational database management system written primarily in C/C++.
 The project started in 1994 but continues to evolve until today.
@@ -1390,28 +1392,32 @@ Since \citeauthor*{kanev2015profiling} attribute the frontend-boundedness to i-c
 More than 66\% of private L2 cache misses in both Linux and Upstream OSv are due to code reads.
 
 \begin{figure}
+\begin{subfigure}{\linewidth}
     \centering
     \resizebox{\linewidth}{!}{
         \input{\evalfigpath{mysqlperf_topdown.pgf}}
     }
     \caption{
-        Top-down analysis top-level breakdown of MySQL under the TPC-C benchmark.
-        The true frontend-boundedness is only visible when removing any spinning, which we only did in Upstream OSv.
-        The break-down is similar to the observations made by \citeauthor*{kanev2015profiling} (Section~\ref{ch:relwork:profiling}).
+        Top-down analysis top-level breakdown.
+        The true frontend-boundedness of MySQL on upstream OSv is only visible when removing spinning in the idle thread, which we did with the \texttt{mwait} configuration.
+        The break-down corresponds to the observations made by \citeauthor*{kanev2015profiling} (Section~\ref{ch:relwork:profiling}).
     }
     \label{fig:eval:stageapi:mysqltd}
-\end{figure}
-
-\begin{figure}
+\end{subfigure}
+\par\bigskip
+\begin{subfigure}{\linewidth}
     \centering
-    \resizebox{\linewidth}{!}{
+    \resizebox{0.8\linewidth}{!}{
         \input{\evalfigpath{mysqlperf_miss_distribution_abs.pgf}}
     }
     \caption{
-        L2 cache misses of MySQL under the TPC-C benchmark.
-        More than 66\% of all L2 cache misses are due to code reads, confirming the assumption that MySQL's instruction working set does not fit into the private cache of contemporary processor cores.
+        L2 cache misses.
+        Although MySQL on OSv incurs fewer L2 misses, the breakdown between code and data misses is similar to Linux:
+        More than 66\% of all L2 cache misses are code misses, confirming the assumption that MySQL's instruction working set does not fit into the private cache of contemporary processor cores.
     }
     \label{fig:eval:stageapi:mysqll2}
+\end{subfigure}
+\caption{MySQL on Linux and upstream OSv during a TPC-C benchmark run.}
 \end{figure}
 
 All of the above makes MySQL a prime example application that could benefit from our solution:
@@ -1475,6 +1481,8 @@ However, it should be noted that the very popular Intel x86-64 micro-architectur
 At last, one can argue that the promised ease-of-use is actually limited by the requirement to use the cache simulator to find switching points.
 Indeed, we can imagine a lot of improvements to the tooling but leave this subject to future work.
 
+\FloatBarrier
+\clearpage % manually
 \section{Whole-System Benchmark with MySQL}\label{ch:eval:perf}
 % hypothesis: Stagified MySQL exhibits higher throughput with our scheduler than on upstream OSv and possibly virtualized Linux
 %             Stagified MySQL speedup is better with increasing number of concurrent clients (due to reduced i-cache misses, etc)
@@ -1501,11 +1509,15 @@ We also vary the \lstinline[style=figurecpp]{max_assignment_age} parameter to ex
 With regards to throughput (Figure~\ref{fig:eval:perf:throughput}), our solution achieves a speedup of up to 22\% at 50 TPC-Terminals.
 Whereas upstream OSv throughput is stagnant after the number of terminals exceeds the number of available hardware threads (6 vCPUs), our solution's maximum throughput is achieved at 20 terminals.
 The influence of the \lstinline[style=figurecpp]{max_assignment_age} is negligible.
-In contrast, the influence of MWAIT vs. busy-waiting is significant:
-We achieve more than 2x the speedup with busy-waiting compared compared to MWAIT.
+In contrast, the influence of \texttt{\textsc{mwait}} vs. busy-waiting is significant:
+We achieve more than 2x the speedup with busy-waiting compared compared to \texttt{\textsc{mwait}}.
+
+Response time is much less affected by our solution than throughput, as is shown in Figure~\ref{fig:eval:perf:reqlat}.
+Only at very high numbers of concurrent clients do we observe lower response times with our solution compared to upstream OSv.
+However, even at 60 terminals, the difference amounts to merely 15ms at mean latencies of 1110ms vs. 1095ms.
 
 \begin{figure}
-    \centering
+\begin{subfigure}{\linewidth}
     \resizebox{\linewidth}{!}{
         \input{\evalfigpath{3way_tpcc_throughput.pgf}}
     }
@@ -1513,36 +1525,35 @@ We achieve more than 2x the speedup with busy-waiting compared compared to MWAIT
         \input{\evalfigpath{3way_tpcc_throughput_speedup.tex}}
     }
     \caption{
-        TPC-C throughput of MySQL on upstream OSv vs. our solution.
-        The error bars indicate the standard deviation over the 8 benchmark runs per configuration.
-        The legend entries in top-to-bottom order correspond to the bars in left-to-right order.
-        The table below shows the speedup with upstream OSv as the baseline.
-        We observe an up to 22\% speedup with our solution with busy-waiting and a 9\% speedup when using MWAIT in the idle thread.
-        The \lstinline[style=figurecpp]{max_assignment_age} parameter (left item in parentheses for our solution) does not significantly affect the performance of our solution.
+        TPC-C throughput and corresponding speedup with upstream OSv as the baseline.
+        Our solution is 22\% faster than upstream with busy-waiting 9\% faster when using \texttt{\textsc{mwait}} in the idle thread.
+        The \texttt{max\_assignment\_age} parameter (left in parentheses) does not significantly affect the performance of our solution.
     }
     \label{fig:eval:perf:throughput}
-\end{figure}
-
-Response time is much less affected by our solution than throughput, as is shown in Figure~\ref{fig:eval:perf:reqlat}.
-Only at very high numbers of concurrent clients do we observe lower response times with our solution compared to upstream OSv.
-However, even at 60 terminals, the difference amounts to merely 15ms at mean latencies of 1110ms vs. 1095ms.
-
-\begin{figure}
+\end{subfigure}
+\begin{subfigure}{\linewidth}
     \centering
     \resizebox{\linewidth}{!}{
         \input{\evalfigpath{3way_tpcc_reqlatency.pgf}}
     }
     \caption{
-        TPC-C request latency of MySQL on Upstream OSv vs. our solution.
-        The error bars indicate the standard deviation over the 8 benchmark runs per configuration.
+        TPC-C request latency.
         Our solution achieves up to 15ms lower request latency at 60 terminals.
         Note however that this is only 1.5\% faster than upstream and that the y-axis in the diagram starts at 850msec.
     }
     \label{fig:eval:perf:reqlat}
+\end{subfigure}
+
+\caption{Whole-system benchmark of MySQL on upstream OSv vs. our solution using the TPC-C benchmark.
+    The error bars indicate the standard deviation over the 8 benchmark runs per configuration.
+    The legend entries in top-to-bottom order correspond to the bars in left-to-right order.
+}
 \end{figure}
 
+
+\FloatBarrier
 \section{Validation of Design Assumptions}
-Although the above results show that our solution achieves up to 22\% higher throughput in the TPC-C benchmark,
+Although the results above show that our solution achieves up to 22\% higher throughput in the TPC-C benchmark,
 we must still validate that our design decisions are responsible for these improvements.
 
 In the following subsections, we thus isolate individual aspects of our design and show that they have the intended effect.
@@ -1551,9 +1562,9 @@ Subsequently, in Section~\ref{ch:eval:mig}, we show the influence of fast thread
 Lastly, we validate the behavior of the core allocation policy and evaluate it's influence on application performance.
 
 Given the observation that the \lstinline[style=figurecpp]{max_assignment_age} parameter has negligible impact on throughput, we use the default value of 20ms.
-However, we continue to perform measurements with both busy-waiting and MWAIT in the idle thread to find the reason for this parameter's significant influence on throughput.
+However, we continue to perform measurements with both busy-waiting and \texttt{\textsc{mwait}} in the idle thread to find the reason for this parameter's significant influence on throughput.
 
-\clearpage
+\FloatBarrier
 \subsection{Instruction Working Set Spreading}\label{ch:eval:spreading}
 % compare our manually chosen points witht hose from mathias' simulation, same measurements as in microbenchmark above
 % tpc-c with single terminal, we only want to show the partitioning works
@@ -1570,19 +1581,39 @@ To validate our primary design goal of spreading the application's instruction w
 we use hardware performance counters and the Linux \texttt{perf} utility to capture events on the vCPUs while executing the TPC-C benchmark.
 Specifically, we record L2 cache events as well as those events required to compute the top-down analysis top-level breakdown (see Section~\ref{ch:relwork:topdown}).
 
-\begin{figure}[b]
+\begin{figure}
+\begin{subfigure}{\linewidth}
     \centering
     \resizebox{\linewidth}{!}{
         \input{\evalfigpath{wsspread_l2.pgf}}
     }
-    \resizebox{\linewidth}{!}{
+    \resizebox{0.8\linewidth}{!}{
         \input{\evalfigpath{wsspread_l2_speedup.tex}}
     }
     \caption{
         L2 cache misses of MySQL under TPC-C benchmark with 1 and 50 TPC-C terminals.
-        The table below shows the relative amount of code and data misses in our solution vs. upstream.
+        The table below shows the relative amount of code and data misses with \emph{Upstream OSv (halt)} as a baseline.
+        The influence of instruction working set spreading is visible in a 65\% reduction of L2 code misses with our solution.
     }
     \label{fig:eval:spreading:l2}
+\end{subfigure}
+\par\bigskip
+\begin{subfigure}{\linewidth}
+    \centering
+    \resizebox{\linewidth}{!}{
+        \input{\evalfigpath{wsspread_topdown.pgf}}
+    }
+    \resizebox{0.8\linewidth}{!}{
+        \input{\evalfigpath{wsspread_topdown.tex}}
+    }
+    \caption{
+        Top-down analysis top-level breakdown at 15 terminals using \texttt{\textsc{mwait}} in the idle thread.
+        Our solution shifts 27 percent points from \emph{frontend-bound} to \emph{backend-bound} and \emph{retiring}.
+    }
+    \label{fig:eval:spreading:td}
+\end{subfigure}
+\par\bigskip
+\caption{Validation of instruction working set spreading through CPU performance counters.}
 \end{figure}
 
 %However, for a fair comparison with regards to the Top-Down metrics, we must modify the idle thread implementation of upstream OSv:
@@ -1593,38 +1624,24 @@ Specifically, we record L2 cache events as well as those events required to comp
 
 Figure~\ref{fig:eval:spreading:l2}~and~\ref{fig:eval:spreading:td} visualize the results of the run described above.
 We observe a reduction of L2 code misses per request by up to 65\% while increasing data misses by at most 2\%.
-MWAIT vs. busy-waiting does not affect the cache behavior of our solution significantly.
-However, we see increased code misses in upstream when using HALT vs. MWAIT and busy-waiting.
-Our explanation for this observation is that calling HALT in the VM causes an exit to the hypervisor and thus additional code misses.
+\texttt{\textsc{mwait}} vs. busy-waiting does not affect the cache behavior of our solution significantly.
+However, we see increased code misses in upstream when using \texttt{\textsc{hlt}} vs. \texttt{\textsc{mwait}} and busy-waiting.
+Our explanation for this observation is that calling \texttt{\textsc{hlt}} in the VM causes an exit to the hypervisor and thus additional code misses.
 With regards to single vs. multiple terminals, we see that our solution only shows increased data misses with unchanged code misses.
 Increased data misses are to be expected given that more requests are likely to touch more (different) data in the same time interval, thus inducing capacity misses.
 Upstream shows a reduction in code misses with multiple terminals, which is likely due to code sharing between threads scheduled on the same core.
 
 %We will show in Section~\ref{ch:eval:mig} that busy-waiting reduces migration latency in the upstream mechanism, but since the uptream OSv scheduler only uses migration for load balancing, this change does not influence cache behavior.
 
-For the top-down top-level breakdown, we compare the MWAIT versions of upstream and our solution, which is necessary because spinning blows up the \textit{retiring} fraction because a tight loop is neither frontend nor backend-bound.
+For the top-down top-level breakdown, we compare the \texttt{\textsc{mwait}} versions of upstream and our solution, which is necessary because spinning blows up the \textit{retiring} fraction because a tight loop is neither frontend nor backend-bound.
 The results are depicted in Figure~\ref{fig:eval:spreading:td}:
 Up to 27 percent points from \textit{frontend-bound} and 1 percent point from \textit{bad speculation} shift to the \textit{backend-bound} and \textit{retiring} category.
 As explained in Section~\ref{ch:relwork:topdown}, this shift is expected given the reduction in L2 code misses.
 
-\begin{figure}
-    \centering
-    \resizebox{\linewidth}{!}{
-        \input{\evalfigpath{wsspread_topdown.pgf}}
-    }
-    \resizebox{\linewidth}{!}{
-        \input{\evalfigpath{wsspread_topdown.tex}}
-    }
-    \caption{
-        Top-down analysis top-level breakdown at 15 terminals using MWAIT in the idle thread.
-    }
-    \label{fig:eval:spreading:td}
-\end{figure}
-
 We interpret the above results as confirmation that we successfully spread the instruction working set of MySQL over multiple cores.
-The use of MWAIT does not correlate with the cache behavior of our solution, i.e., the quality of instruction working set spreading is independent of the sleeping strategy.
+The use of \texttt{\textsc{mwait}} does not correlate with the cache behavior of our solution, i.e., the quality of instruction working set spreading is independent of the sleeping strategy.
 
-\clearpage
+\FloatBarrier
 \subsection{Changes to Thread Migration}\label{ch:eval:mig}
 % hypothesis: thread migration on Linux and upstream OSv is not faster than 9 - 14 us (ref sodaspr / compspr)
 %             our thread migration is as fast as the code path from enqueue to switch_to + memory latency / cache coherence protocol
@@ -1647,14 +1664,14 @@ We cannot not use the synchronous API (\lstinline[style=figurecpp]{thread::pin(c
 We configure both upstream and our solution to use fixed core allocation with two dedicated cores per stage.
 Both implementations choose the core with the shorter runqueue length as migration target.
 In addition to the configurable idle strategies in Section~\ref{ch:eval:setup:idle}, we also implement an option to disable pre-halt spinning in the idle thread to avoid distortions to the top-down top-level breakdown.
-For brevity, we will refer to the pre-halt or pre-mwait spinning as \texttt{prespin} and for direct HALT or MWAIT as \texttt{nospin}.
+For brevity, we will refer to the pre-\texttt{\textsc{hlt}} or pre-\texttt{\textsc{mwait}} spinning as \texttt{prespin} and for direct \texttt{\textsc{hlt}} or \texttt{\textsc{mwait}} as \texttt{nospin}.
 
 We measure stage switching latency using a self-written micro-benchmark (\texttt{hopper}).
 We configure the benchmark to define 3 stages and perform 100000 round-robin stage migrations.
 \texttt{hopper} discards the first 1000 iterations and collects the remaining results in a histogram with 200ns buckets.
 Figure~\ref{fig:eval:mig:hopperdists} shows the results:
 Our solution achieves a mean latency of 1300ns with more than 97\% of migrations under 1400ns.
-The influence of MWAIT is visible in form of a slightly wider-spread distribution and an increased mean value 1660ns, amounting to 360ns additional mean latency.
+The influence of \texttt{\textsc{mwait}} is visible in form of a slightly wider-spread distribution and an increased mean value 1660ns, amounting to 360ns additional mean latency.
 
 Upstream OSv achieves 6146ns mean latency in the \texttt{mwait-nospin} configuration and 6528ns in \texttt{halt-nospin} configuration.
 As can be seen in the histogram, \texttt{mwait-prespin} and \texttt{busy} achieve practically equivalent latencies at $\approx$ 4300ns whereas the \texttt{halt-prespin} configuration has approximately the same offset to \texttt{mwait} in the \texttt{nospin} case.
@@ -1662,10 +1679,10 @@ For the micro-benchmark, the small difference between the \texttt{prespin} confi
 The benchmark does not perform any work in a stage and switches immediately to the next one.
 Therefore, it reaches the first stage again before both of its cores went to sleep.
 
-We were unable to find an explanation for the different penalties of MWAIT for our solution vs. upstream (+360ns vs. +1800ns).
+We were unable to find an explanation for the different penalties of \texttt{\textsc{mwait}} for our solution vs. upstream (+360ns vs. +1800ns).
 % IPIs are only enabled for HALT, and we tested manually that the addiitonal irq_lock with the lock guard is not causing significant latency
 However, the more important observation is that even with busy waiting, our solution achieves more than 70\% lower latency:
-The mean value of 1660ns with MWAIT is comparable to the bare-metal IPI propagation of 1700ns measured in~\cite{ipiLatencyPopcornLinux}, which is exceeded by more than 4800ns by upstream OSv.
+The mean value of 1660ns with \texttt{\textsc{mwait}} is comparable to the bare-metal IPI propagation of 1700ns measured in~\cite{ipiLatencyPopcornLinux}, which is exceeded by more than 4800ns by upstream OSv.
 At last, since busy-waiting in upstream and our solution have the same propagation time through the cache coherence protocol, we can be certain that all additional migration latency with busy-waiting in upstream OSv is due to interrupt virtualization and the performance implications of helper threads in upstream OSv.
 
 \begin{figure}
@@ -1676,7 +1693,7 @@ At last, since busy-waiting in upstream and our solution have the same propagati
     \caption{
         Histogram of \texttt{hopper} migration latencies with 200ns buckets, bars drawn at the center of each bucket.
         The last row shows the exact mean values.
-        Our solution shows more than 70\% lower migration latency and is less affected by halting / MWAIT than upstream.
+        Our solution shows more than 70\% lower migration latency and is less affected by \texttt{\textsc{mwait}} than upstream.
     }
     \label{fig:eval:mig:hopperdists}
 \end{figure}
@@ -1691,14 +1708,14 @@ We interpret the single-terminal speedup as the influence of reduced migration l
 With a single client, there is always at most one runnable request-handler thread in the system, hence no need for thread-migration on wake-up.
 For multiple terminals, the additional 10 percent points in throughput can consequently be attributed to thread-migration on wake-up.
 
-Looking at the effect of MWAIT vs. busy-waiting, the 90\% higher throughput of \texttt{upstream prespin} and \texttt{upstream busy-waiting} vs. \texttt{upstream nospin} is very prominent.
-In contrast, our solution is only 10 -- 14\% faster with busy-waiting vs. MWAIT.
+Looking at the effect of \texttt{\textsc{mwait}} vs. busy-waiting, the 90\% higher throughput of \texttt{upstream prespin} and \texttt{upstream busy-waiting} vs. \texttt{upstream nospin} is very prominent.
+In contrast, our solution is only 10 -- 14\% faster with busy-waiting vs. \texttt{\textsc{mwait}}.
 These effects correlate with the different migration latency increases observed with the micro-benchmark (+1800ns vs +360ns) for which we do not have a plausible explanation.
 Since the migration latency increases are not the same, we cannot clearly attribute the throughput differences between upstream and our solution to either thread-migration on wake-up or absolutely lower migration latency.
 
 Given the results presented in this section, we can conclude that our changes to thread migration are the most relevant contributor to the total 22\% increase of throughput achieved by our solution (see Section~\ref{ch:eval:perf}).
 Although both migration latency and thread-migration on wake-up have been shown to provide performance improvements in the busy-waiting case,
-the relationship of MWAIT to migration latency and throughput requires further investigation in future work.
+the relationship of \texttt{\textsc{mwait}} to migration latency and throughput requires further investigation in future work.
 
 \begin{figure}
     \resizebox{\linewidth}{!}{
@@ -1719,7 +1736,7 @@ the relationship of MWAIT to migration latency and throughput requires further i
     \label{fig:eval:mig:tpcc}
 \end{figure}
 
-\clearpage
+\FloatBarrier
 \subsection{Core Allocation: Validation of Implementation}\label{ch:eval:polidea}
 
 The last major component of our design is the core allocation policy.
@@ -1782,21 +1799,19 @@ However, we want to emphasize that we did not show the critical $O(S^2 * C^2)$ a
 \end{figure}
 
 
-
-
-\clearpage
+\FloatBarrier
 \subsection{Core Allocation: Performance Evaluation}\label{ch:eval:polperf}
 
 After having validated that the core allocation policy works as designed in the previous section, we will now evaluate its effect on application performance.
 As a baseline, we use our version of OSv with fixed core allocation and two dedicated cores per stage.
 We continue to use the length of the runqueue to decide on which core within a stage a thread should be dispatched.
 We use the TPC-C benchmark with a varying number of terminals to evaluate MySQL performance and concurrently capture L2 metrics on the vCPUs.
-Additionally, we perform two separate runs with MWAIT vs. busy-waiting in the idle thread.
+Additionally, we perform two separate runs with \texttt{\textsc{mwait}} vs. busy-waiting in the idle thread.
 The comparison between fixed core allocation and the core allocation policy is fair with regards to available CPU resources because we define exactly 3 stages for MySQL, resulting in two dedicated cores per stage.
 
 As is visible in Figure~\ref{fig:eval:capperf:table}, the maximum increase in throughput achieved by the core allocation policy is only 3\%, starting at 25 TPC-C terminals and higher.
-Additionally, these 3\% are only reached when using busy-waiting --- the speedup with MWAIT is at most 2\%.
-Further, especially for MWAIT, the improvement lies within the standard deviation and is thus not very relevant.
+Additionally, these 3\% are only reached when using busy-waiting --- the speedup with \texttt{\textsc{mwait}} is at most 2\%.
+Further, especially for \texttt{\textsc{mwait}}, the improvement lies within the standard deviation and is thus not very relevant.
 The L2 cache metrics show that the core allocation policy reduces codes misses per request by up to 5\%.
 However, data misses are increased by 1 -- 2\%.
 The impact of dynamic core allocation on request latency is negligible (not shown in the figure).
@@ -1837,7 +1852,7 @@ Because we use 6 vCPUs for 3 stages in MySQL, condition \ref{ch:eval:polperf:arg
 }
 \end{figure}
 
-\clearpage
+\FloatBarrier
 \section{Discussion}\label{ch:eval:discussion}
 As shown in in the previous section, our stage-aware scheduling solution is able to improve the throughput of the multi-threaded MySQL database server by up to 22\%.
 The speedup is sustained at a high number of concurrent clients.
@@ -1880,7 +1895,7 @@ We further track a thread's current stage in its TCB, enabling the implementatio
 Our scheduling policy time-multiplexes cache-residency by dedicating cores to stages for certain time intervals.
 The scheduler dispatches a thread in a particular stage only onto those cores that are assigned to its current stage, which causes all threads to execute on pre-warmed i-caches.
 
-The evaluation has shown that we achieve 22\% increased throughput in an optimal configuration and 9\% increased throughput when using the power-saving MWAIT instruction when waiting for incoming threads in the thread migration mechanism.
+The evaluation has shown that we achieve 22\% increased throughput in an optimal configuration and 9\% increased throughput when using the power-saving \texttt{\textsc{mwait}} instruction when waiting for incoming threads in the thread migration mechanism.
 Both configurations reduce L2 code misses by 65\%.
 Request latency is also slightly reduced, confirming our thesis that an SMP-oriented design can avoid the penalties on request latency of the early 2000's proposals.
 We have shown that fast thread migration and the integration of our policy into the scheduler's wake-up mechanism are necessary to achieve the performance improvements described above.
@@ -1912,7 +1927,7 @@ The hardware threads of an SMT-enabled CPU are commonly exposed to the operating
 The corresponding topology information, i.e., which of these logical cores belong to which physical cores, can be obtained through instructions such as CPUID.~\cite{intelSDMTopology}
 Logical cores share the private cache of the physical core.~\cite{intelSDMHyperthreading}
 The core allocation policy would need to assert that all logical cores of a physical core are assigned to the same stage to prevent i-cache thrashing.
-We expect the performance-degrading effect of MWAIT to be mitigated by using SMT because the logical cores that are not idling can continue to perform useful work.~\cite{intelSDMHyperthreading}
+We expect the performance-degrading effect of \texttt{\textsc{mwait}} to be mitigated by using SMT because the logical cores that are not idling can continue to perform useful work.~\cite{intelSDMHyperthreading}
 
 \backmatter
 
