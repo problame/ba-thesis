@@ -93,7 +93,7 @@ many legacy applications still follow the multi-threaded model where each reques
 Recent profiling at Google suggests that the instruction working set of many server applications does not fit into the private i-caches of contemporary processors, causing underutilization of their super-scalar out-of-order pipeline.
 In a multi-threaded server with an oversized instruction working set, a context switch between two request-handler threads is thus likely to cause i-cache misses and subsequent pipeline stalls.
 
-In this thesis, we analzye existing approaches to optimize the cache behavior of network servers.
+In this thesis, we analyze existing approaches to optimize the cache behavior of network servers.
 Based on proof-of-concept work at the KIT OS group, we then present a thread scheduler design that uses fast thread migration to spread the instruction working set of a process over the private caches of all available CPU cores.
 From applications, we only require adoption of an unintrusive user-space API that allows partitioning the request-handling code path into \emph{stages} which fit the private i-caches of the targeted CPU.
 %In contrast to previous approaches in the field, the API allows spreading the working set at arbitrary positions in the application code.
@@ -277,7 +277,7 @@ The execution flow in databases exhibits low spatial locality and the instructio
 In contrast to cohort scheduling, STEPS groups threads into \emph{team lists} organized by the high-level application-specific operation they currently execute, for example \texttt{\textsc{insert}} or \texttt{\textsc{update}} queries.
 The code path of the operation then contains context-switching points (\textit{\texttt{CTX} calls}) at which the currently executing thread yields control to the next member of its team list, which amounts to user-mode round-robin scheduling within a team.
 Context-switching points are placed such that the working set between two of them fits into the CPU's L1 i-cache.
-The schema described above leads to a step-by-step progression of the entire team that is depicated in Figure~\ref{fig:cohort_and_steps}.
+The schema described above leads to a step-by-step progression of the entire team that is depicted in Figure~\ref{fig:cohort_and_steps}.
 As an example, let us imagine three context-switching points $A$, $B$ and $C$ and a team of ten threads executing between $A$ and $B$.
 After the last thread reaches $B$, the team moves forward to the next step  \textit{$B$ to $C$}.
 Although the first thread executing this step will incur capacity i-cache misses, it pre-warms i-cache and branch predictors for the remaining nine threads.~\cite{steps}
@@ -333,7 +333,7 @@ An \emph{instruction fetch unit} that decodes the incoming instruction stream in
 an \emph{out-of-order execution engine} that executes those uops on functional units and
 an \emph{in-order retirement} unit that ensures that the effects of the issued instructions appear in program order.~\cite{intelArchPipeline}.
 
-\citeauthor{yasinTopdown}~\cite{yasinTopdown} further simplify this view by only differentiating betwee \emph{frontend} and \emph{backend}:
+\citeauthor{yasinTopdown}~\cite{yasinTopdown} further simplify this view by only differentiating between \emph{frontend} and \emph{backend}:
 The frontend is responsible for fetching instructions, decoding them to uops and supplying them to the backend, which in turn is in charge of fetching operands, scheduling uops on the functional units and retiring instructions in program-order.
 The authors present the \textbf{top-down} performance analysis method, which helps to identify micro-architectural bottlenecks by classifying CPU time into categories that are organized in a nested tree.
 When applying the method, one traverses the tree top-down, usually following those categories marked with the highest percentage of spent CPU time.
@@ -597,7 +597,7 @@ For the rest of this thesis, we will refer to an application that uses the stage
 %%In the above example, one would thus define stages for interaction with the network stack, for serialization and each SQL operation, i.e., \texttt{INSERT}, \texttt{SELECT}, etc.
 %%Before calling \texttt{read} or \texttt{write} on the network socket, the developer would then switch to the network-stack-stage.
 
-Our scheduler tracks a thread's assiciation to its current stage in the thread's TCB.
+Our scheduler tracks a thread's association to its current stage in the thread's TCB.
 Additionally, it tracks per stage the number of runnable threads associated with it.
 We then use this information to periodically compute the \emph{current core allocation}, which assigns CPU cores to stages proportional to the stages' load.
 A core is thus always allocated to exactly one stage. % however, a stage may not have any dedicated cores. only tell that in the details section
@@ -638,7 +638,7 @@ It confines itself to providing a familiar execution environment for a \emph{sin
 To run an application on OSv, it is bundled with the OSv kernel into a virtual machine image.
 When the VM starts, OSv establishes a \emph{single virtual address space} and dynamically links the application against OSv's own C standard library, in which system calls are merely calls to OSv-internal functions.
 This technique allows dynamically linked applications built on Linux to execute unmodified on OSv, unless they depend on facilities intentionally not provided by OSv such as forking new processes.
-The single trust domain property furthermore allows omitting all privilegelevel switching between OSv and the application.
+The single trust domain property furthermore allows omitting all privilege level switching between OSv and the application.
 In summary, the removed user-kernel-boundary and syscall overhead improves application performance significantly without any application code changes required.
 However, if application developers choose to specifically target OSv, more efficient system APIs provide further optimization, e.g., zero-copy networking as opposed to the traditional socket API.~\cite{osvMain}
 
@@ -736,7 +736,7 @@ void request_handler(database db, net::conn c) {
 \end{figure}
 
 In addition to the direct invocation of the switching API, we provide a data-structure similar to C++11 lock guards:
-Following the \emph{resource aquisition is initialization} (RAII) paradigm, the structure allows switching to a stage for the liftetime of a block and to automatically switch back to the previous stage when the guard object goes out of scope.
+Following the \emph{resource acquisition is initialization} (RAII) paradigm, the structure allows switching to a stage for the lifetime of a block and to automatically switch back to the previous stage when the guard object goes out of scope.
 The guard objects can also be used to shift the responsibility of switching stages from the function caller to the callee, which is particularly useful when a piece of code is large enough to have its own stage but is called from more than one other stage.
 Figure~\ref{fig:di:api:examplestack} shows how the above example looks like with the RAII-style API.
 
@@ -926,7 +926,7 @@ In the latter case, the thread may even observe that it has already been woken u
 \begin{figure}
     \centering
     \includegraphics[width=\textwidth]{fig_build/state_chart_pre_spread}
-    \caption{Upstream OSv wakup-related thread state transitions: States \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambigous with regard to whether the thread is still scheduling out whether it has fully stopped executing.
+    \caption{Upstream OSv wakup-related thread state transitions: States \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambiguous with regard to whether the thread is still scheduling out whether it has fully stopped executing.
     Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.}
     \label{fig:di:wake:upstreamstates}
 \end{figure}
@@ -1185,7 +1185,7 @@ increased instruction cache misses are to be expected.
 We can quantify the problem outlined above by measuring the effect of reducing the frequency at which the PAS runs from 1000Hz to 10Hz.
 The results for this experiment are shown in Figure~\ref{fig:ch:di:osvpageaccessscannerbench}:
 With 10Hz, our solution achieves 17\% higher throughput compared to 1000Hz.
-Upstream in contrast is much less affected with only 10\% higher throghput at 10Hz PAS frequency.
+Upstream in contrast is much less affected with only 10\% higher throughput at 10Hz PAS frequency.
 The differences in throughput are visible in the i-cache miss ratios:
 Whereas our solution incurs 3 percent points fewer code misses with 10Hz, upstream OSv's code misses increase by 1 percent point.
 
@@ -1312,7 +1312,7 @@ Our solution requires dedicated cores and caches because all performance benefit
 However, we are also unaware how dedicated vCPUs could disadvantage Linux or upstream OSv in the comparisons made in this chapter.
 
 When using Linux as a baseline, we refer to an installation of Debian 9 in a virtual machine that starts the MySQL 5.6.38 Docker image on boot.
-The MySQL data directory is bind-monuted from the ext4-formatted root partition on the emulated HDD to avoid the overhead of unionfs.
+The MySQL data directory is bind-mounted from the ext4-formatted root partition on the emulated HDD to avoid the overhead of unionfs.
 For all other aspects, the QEMU configuration described above applies.
 
 With regards to OSv, we emphasize again we had to reduce the frequency of the \emph{page access scanner} (PAS) system thread from 1000Hz to 10Hz (see Chapter~\ref{ch:di:pol:pas:eval}).
@@ -1632,7 +1632,7 @@ The use of MWAIT does not correlate with the cache behavior of our solution, i.e
 % result: is faster, we know that
 % interpretation: mwait costs approx 1us more than busy-waiting, linux 4.* is faster than 2.* because it uses monitor & mwait instead of IPIs on supported platforms
 
-The analysis in the previous section shows that we are successfully spreading the instruction working set of MySQL, which we accomply through thread migration.
+The analysis in the previous section shows that we are successfully spreading the instruction working set of MySQL, which we accomplish through thread migration.
 In Section~\ref{ch:di:mig}, we have presented a thread migration mechanism that we claim to be faster than the upstream OSv facility.
 Additionally, we refactored the wake-up mechanism to allow thread migration on wake-up, enabling immediate dispatch of a woken-up thread to any of its current stage's cores (see Section~\ref{ch:di:wake}).
 In this section, we validate that we reduced migration latency with our migration mechanism, its effect on throughput and the additional speedup achieved through thread migration on wake-up.
@@ -1915,7 +1915,7 @@ We expect the performance-degrading effect of MWAIT to be mitigated by using SMT
 \chapter{Appendix}\label{ch:appendix}
 
 This thesis was submitted with a digital copy of our implementation, benchmarking tools and supplemental utility scripts.
-Futhermore, we make this material available via GitHub:
+Furthermore, we make this material available via GitHub:
 All repositories referenced below are published under the \url{github.com/problame} account.
 To facilitate orientation in the codebase, we provide the the following overview.
 
