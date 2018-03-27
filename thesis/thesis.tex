@@ -90,21 +90,22 @@
 \input{kit_style/declaration}
 
 \chapter{Abstract}
-Scalable high-performance network servers are required for today's distributed infrastructure.
-While event-driven concurrency models proposed in the early 2000s provide better scalability properties than multi-threaded servers in practice,
+Scalable high-performance network servers are a requirement in today's distributed infrastructure.
+Event-driven concurrency models often provide better scalability properties than multi-threaded servers but
 many legacy applications still follow the multi-threaded model where each request is handled by a dedicated operating system thread.
 Recent profiling at Google suggests that the instruction working set of many server applications does not fit into the private i-caches of contemporary processors, causing underutilization of their super-scalar out-of-order pipeline.
-In a multi-threaded server with an oversized instruction working set, a context switch between two request-handler threads is thus likely to cause i-cache misses and subsequent pipeline stalls.
+In a multi-threaded server with an oversized instruction working set, context switches between two request-handler threads are thus likely to cause i-cache misses and subsequent pipeline stalls.
 
-In this thesis, we analyze existing approaches to optimize the cache behavior of network servers.
-Based on proof-of-concept work at the KIT OS group, we then present a thread scheduler design that uses fast thread migration to spread the instruction working set of a process over the private caches of all available CPU cores.
-From applications, we only require adoption of an unintrusive user-space API that allows partitioning the request-handling code path into \emph{stages} which fit the private i-caches of the targeted CPU.
-%In contrast to previous approaches in the field, the API allows spreading the working set at arbitrary positions in the application code.
-Further, we overcome limitations of the proof-of-concept with regards to multi-client and multi-core scalability by implementing our design directly in the thread scheduler and by proposing a policy that allocates CPU cores dynamically among stages, thereby taking cache residency into account.
+We start by analyzing existing approaches to optimize the cache behavior of network servers.
+One technique applicable to multi-core systems is executing different parts of an application's code on different cores.
+By migrating threads to those cores whose caches contain the threads' current instruction working set, the application's code is effectively spread over the system's private i-caches and code misses are greatly reduced.
+Proof-of-concept work at the KIT OS group shows the potential of this technique, but the implementation does not scale to multiple clients and cores.
+In this thesis, we therefore propose that the spreading technique described above must be tightly integrated with the OS thread scheduler.
+We present an unintrusive user-space API that allows partitioning a multi-threaded server's request handler code path into \emph{stages}.
+Our scheduler then dynamically assigns cores to stages and dispatches threads on their current stages' cores.
 
-We evaluate the design and its implementation in the OSv library operating system by adapting the MySQL database management system to our solution.
-Our experiments show that we achieve up to 22\% higher throughput caused by a 65\% reduction of L2 i-cache misses under the TPC-C benchmark.
-Unlike previous approaches, we do not sacrifice request latency for this improvement.
+We evaluate our design and its implementation in the OSv library operating system by adapting the MySQL database management system to our solution.
+We achieve up to 22\% higher throughput caused by a 65\% reduction of L2 i-cache misses without having to sacrifice request latency for this improvement.
 
 \mainmatter
 \cleardoublepage
