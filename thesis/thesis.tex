@@ -494,7 +494,7 @@ Figure~\ref{fig:kit_os_poc_blocking} visualizes this situation.
     \label{fig:kit_os_poc_blocking}
 \end{figure}
 
-The authors evaluate their system using the TPC-C benchmark, comparing throughput and cache behavior of a modified version of MySQL 5.6.38 against an umodified version as a baseline.
+The authors evaluate their system using the TPC-C benchmark, comparing throughput and cache behavior of a modified version of MySQL 5.6.38 against an unmodified version as a baseline.
 %Thethat and \emph{stagified} version of MySQL 5.6.38 running on an SMP system with X cores.
 For a single client and low core counts, they observe the expected 40\% reduction in L2 cache misses, correlating with a 17\% speedup in throughput.
 However, for both an increased number of concurrent clients and a higher number of CPU cores, throughput is ${10\text{~--~}40\%}$ below baseline.
@@ -917,7 +917,7 @@ Let us first look at the wake-up-related state transitions that a thread might g
 The most common case will be that a thread goes to sleep, waiting for some predicate to become true, for example that a timer has expired or that it acquired a mutex.
 The \textit{running} thread will then transition synchronously to the \textit{waiting} state and schedule out.
 Let us now imagine that another thread makes the predicate become true.
-That \emph{waker} knows the threads waiting for this condition and wakes them using the \lstinline[style=figurecpp]{wake()} function, which puts the woken thread's TCBs into their last core's \lstinline[style=figurecpp]{incoming_wakups}, which is in turn eventually drained into the core's runqueue.
+That \emph{waker} knows the threads waiting for this condition and wakes them using the \lstinline[style=figurecpp]{wake()} function, which puts the woken thread's TCBs into their last core's \lstinline[style=figurecpp]{incoming_wakeups}, which is in turn eventually drained into the core's runqueue.
 
 The crucial observation in this section is that the corresponding \textbf{OSv thread states do not precisely encode whether the a thread has stopped executing}.
 In fact, only threads in state \textit{queued} are guaranteed to be stopped and only threads in state \textit{running} are guaranteed to be running.
@@ -928,7 +928,7 @@ In the latter case, the thread may even observe that it has already been woken u
 \begin{figure}
     \centering
     \includegraphics[width=\textwidth]{fig_build/state_chart_pre_spread}
-    \caption{Upstream OSv wakup-related thread state transitions: States \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambiguous with regard to whether the thread is still scheduling out whether it has fully stopped executing.
+    \caption{Upstream OSv wake-up-related thread state transitions: States \textit{waiting}, \textit{sending\_lock} and \textit{waking} are ambiguous with regard to whether the thread is still scheduling out whether it has fully stopped executing.
     Dashed lines represent events asynchronous to thread execution, solid lines represent synchronous events.}
     \label{fig:di:wake:upstreamstates}
 \end{figure}
