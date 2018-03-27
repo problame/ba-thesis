@@ -1151,35 +1151,28 @@ The requirements vector is computed as described above since revision \refosvcom
 
 \subsection{OSv's Page Access Scanner}
 During the implementation of the core allocation policy we found that an OSv system thread called \emph{page access scanner} (PAS) consumes significant CPU time.
-It is unpinned (not per-CPU) and thus always executes on cpu0 in our solution because we removed the upstream scheduler's load balancing mechanism and only provide stage-aware scheduling to applications, not OSv system threads.
-
-Since the PAS is apparently the only unpinned system thread that consumes significant CPU time, we investigated it more closely:
 OSv's main filesystem is a port of the Zettabyte File System (ZFS) which includes its own Adaptive Replacement Cache (ARC).
 The OSv page cache uses the PAS thread to inform the ARC about recent usage of file-backed pages by checking and subsequently clearing the page table entries' accessed bits.
 The PAS consists of an infinite loop that self-tunes the CPU time it consumes through a target value $t \in [0.1, 20]$:
 It scans pages for $t$\% and then sleeps for $100-t$\% of the time it runs, where $t$ depends on a decaying average of the page access rate.
-The loop runs at a hard-coded frequency of 1000Hz.
-While this value is respected in the formula to calculate the maximum time the PAS may run before going to sleep, changing it affects the effective amount of work done by the PAS:
-For example, when choosing 10Hz instead of 1000Hz as the PAS frequency, each invocation of the PAS can in theory run up to 100 times longer, but since the entire page cache may be scannable in a shorter time, the PAS may go back to sleep early.
-As a side-effect, a reduced frequency also lowers the temporal resolution of the page usage data available to the ARC.
+The frequency at which the PAS activates is hard-coded to 1000Hz.
 
-Our core allocation policy does not handle this situation well:
-We track stage load in the stage switching and the reschedule routines, not by summing up the length of a stage's cores' runqueues.
-Any load caused by system threads is thus invisible to our policy, which is generally acceptable because most system threads are per-CPU-threads and usually sleep.
-However, the PAS is an exception in this case because it runs for up to 20\% of the CPU time given to it by the scheduler.
-Whenever the core allocation policy assigns cpu0 to a stage, that stage's threads will --- invisible to the core allocation policy --- compete with the PAS for CPU-time.
-%Within a stage, we always enqueue a thread to the core with the shortest runqueue.
-%At a high-frequency of PAS invocations (1000Hz), highto a  core load-balance b
-Furthermore, the high frequency of PAS invocations (1000Hz) is detrimental to cache performance on cpu0:
-The PAS thread's instruction working set is disjoint from the stage's threads' working set and given that the latter is chosen to just fit the CPU-private cache, the frequent scheduling of the PAS thread causes i-cache misses in the private cache of cpu0.
-%At first, we must emphasize that the use of non-preemptive round-robin scheduling per CPU is not problematic because the PAS thread consistently sleeps after less than 500 $\mu s$ of execution.
-%However, a file-system intensive application like MySQL drives $t$ toward $20\%$ of targeted CPU time, thus leaving only 80\% of CPU 0's  time to the stage's threads.
+The PAS is not pinned to a specific core and would thus be subject to load-balancing in upstream OSv.
+However, we removed the upstream load-balancer in our solution, which implies that the PAS always executes on cpu0 because it does not use the stage API.
+As such, it is also invisible in the stage load vector because we track stage load in the stage switching and the reschedule routines, not by summing up the length of a stage's cores' runqueues.
+Thus, whenever the core allocation policy assigns cpu0 to a stage, that stage's threads will compete with the PAS for CPU-time and cache-residency.
+Given that a stage's threads' working set is
+\begin{enumerate*}[label=(\alph*)]
+   \item disjoint from the PAS and
+    \item chosen to barely fit the private cache of a core,
+\end{enumerate*}
+increased instruction cache misses are to be expected.
 
-We can quantify the effect outlined above by comparing throughput and cache behavior with 1000Hz vs 10Hz PAS frequency.
-The results are shown in Figure~\ref{fig:ch:di:osvpageaccessscannerbench}:
-With PAS frequency reduced to 10Hz, our solution achieves 17\% higher throughput compared to 1000Hz.
+We can quantify the problem outlined above by measuring the effect of reducing the frequency at which the PAS runs from 1000Hz to 10Hz.
+The results for this experiment are shown in Figure~\ref{fig:ch:di:osvpageaccessscannerbench}:
+With 10Hz, our solution achieves 17\% higher throughput compared to 1000Hz.
 Upstream in contrast is much less affected with only 10\% higher throghput at 10Hz PAS frequency.
-The differences in throughput are visible in the respective code miss ratios:
+The differences in throughput are visible in the i-cache miss ratios:
 Whereas our solution incurs 3 percent points fewer code misses with 10Hz, upstream OSv's code misses increase by 1 percent point.
 
 \begin{figure}
@@ -1194,7 +1187,11 @@ Whereas our solution incurs 3 percent points fewer code misses with 10Hz, upstre
 \label{fig:ch:di:osvpageaccessscannerbench}
 \end{figure}
 
-We have considered several approaches to solve the problems of the PAS in the core allocation policy:
+It is important to emphasize that the change to 10Hz causes the PAS to perform less work in both upstream and our solution:
+By adding additional tracepoints, we found that at 10Hz, the 100x longer time slice available to the PAS is sufficient to scan the entire page table, causing the PAS to go to sleep early.
+However, as seen in the results above, the 100x less frequent but longer-running invocations of the PAS mitigate the impact on i-cache and throughput for our solution.
+
+We have considered several approaches to handle the default 1000Hz PAS frequency because implementation details of the page cache are technically out of scope for this thesis.
 At first, one could model cpu0 as a \emph{{50\,--\,80\%} CPU}.
 However, this solution is not very general since we lack a precise model for the impact of the cache trashing caused by the PAS.
 Furthermore, the current implementation would require many special cases to support CPUs in non-integer quantities.
@@ -1210,14 +1207,13 @@ The fictional PAS-stage however would only ever have zero or one runnable thread
 Instead, it would be frequently dispatched on a random core and evict that core's stage's working set.
 Experiments showed that this option is not worth pursuing without the concept of a \emph{thrashing core}, at which point one could fully fall back to the proposal in the previous paragraph.
 
-\subsubsection{Impact on Evaluation}\label{ch:di:pol:pas:eval}
+\subsubsection{Reducing the PAS Frequency to 10Hz}\label{ch:di:pol:pas:eval}
 The primary goal of this thesis is to show that it is possible to implement work-conserving, stage-aware scheduling policy by choosing the right abstractions and mechanisms.
 Ideally, the corresponding scheduling policy should be competitive without further modifications to the remaining operating system.
-However, the schedule for this thesis did not allow us to solve the problems that the page access scanner poses to our scheduling policy.
+However, our approach and time constraints did not allow us to solve the problems that the page access scanner poses to our scheduling policy in a general way.
 \textbf{Therefore, for the entire evaluation, we set the PAS frequency to 10Hz in both upstream OSv and our modified version.}
-As described in the previous section, the reduced frequency removes the impact on core allocation and cache thrashing, which is necessary to show the changes to cache behavior caused by our stage-aware scheduler.
 Despite the modifications to upstream OSv being technically unnecessary, we consider the comparison between the 10Hz-versions of upstream and our version of OSv to be fair with regards to available CPU time, since both configurations benefit equally from the removed impact of the PAS.
-The implementation of a work-around for the PAS is thus left open to future work.
+The design of a general-purpose solution for the PAS is thus left open to future work.
 
 
 
